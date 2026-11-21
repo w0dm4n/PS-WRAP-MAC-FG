@@ -1,116 +1,116 @@
-# PS-WRAP-MAC-FG — GTA 6 (PS5) à 60 fps sur Mac
+# PS-WRAP-MAC-FG — GTA 6 (PS5) at 60 fps on a Mac
 
-> **EN —** A fork of [PS-WRAP-MAC](https://github.com/iDevGIS/PS-WRAP) (itself a fork of [chiaki-ng](https://github.com/streetpea/chiaki-ng)) for Apple Silicon Macs. It streams your PS5 over Remote Play and **doubles the frame rate with frame generation**: GTA 6 runs at 30 fps on PS5, and you see ~60 fps on the Mac. Interpolation uses Apple's VideoToolbox (macOS 26+), with a RIFE fallback. It also reduces halos around the character and adds FSRCNNX upscaling. No capture card is needed. The instructions below are in French.
+GTA 6 runs at **30 fps** on PS5. This fork of the PS-WRAP-MAC Remote Play client computes **an in-between frame for every pair of streamed frames** on your Mac. That takes you from 30 to **~60 fps on screen**, with no capture card and no changes to the console.
 
-GTA 6 tourne à **30 fps** sur PS5. Ce fork du client Remote Play PS-WRAP-MAC calcule **une image intermédiaire entre chaque paire d'images** du stream, sur ton Mac. Tu passes ainsi de 30 à **~60 fps affichés**, sans carte d'acquisition et sans toucher à la console.
+It is a fork of [PS-WRAP-MAC](https://github.com/iDevGIS/PS-WRAP), itself a fork of [chiaki-ng](https://github.com/streetpea/chiaki-ng), for Apple Silicon Macs.
 
-## Ce que ça apporte par rapport à PS-WRAP-MAC
+## What it adds over PS-WRAP-MAC
 
 | | PS-WRAP-MAC 0.14 | **PS-WRAP-MAC-FG** |
 |---|---|---|
-| Moteur de frame gen | shader optical-flow maison | **Apple VideoToolbox** (`VTFrameProcessor` low-latency), repli **RIFE 4.25** (Metal) |
-| Halos et fantômes autour du perso | visibles | supprimés (images « tenues » quand l'interpolation n'est pas fiable) |
-| Bandes violettes, bords qui bavent en pano | oui | corrigé (remplissage des bords) |
-| Régularité de l'affichage | ~54 fps, 58 % des images à l'heure | **~58–60 fps, ~94 % à ±4 ms** |
-| Upscaling | preset High Quality | **High Quality + Spatial (FSRCNNX)** par défaut |
-| Freeze H.265 sur perte Wi-Fi | possible | « IDR on FEC failure » activé par défaut, plus un watchdog vidéo |
-| Écran en veille quand tu es AFK | le stream se fige | l'écran reste allumé pendant le stream |
-| Son perdu après un blocage audio | ne revient pas | se rouvre automatiquement |
+| Frame gen engine | custom optical-flow shader | **Apple VideoToolbox** (`VTFrameProcessor` low-latency), with a **RIFE 4.25** (Metal) fallback |
+| Halos and ghosting around the character | visible | removed (frames are held where interpolation is unreliable) |
+| Magenta bars, smeared edges on camera pans | yes | fixed (edge fill) |
+| Frame pacing | ~54 fps, 58 % of frames on time | **~58–60 fps, ~94 % within ±4 ms** |
+| Upscaling | High Quality preset | **High Quality + Spatial (FSRCNNX)** by default |
+| H.265 freezes when Wi-Fi drops packets | possible | "IDR on FEC failure" on by default, plus a video watchdog |
+| Display going to sleep while you're AFK | the stream freezes | the display stays on while streaming |
+| Sound lost after an audio stall | never comes back | reopens automatically |
 
-Ces mesures viennent d'enregistrements ScreenCaptureKit à 120 Hz, analysés image par image en jeu (GTA 6, Wi-Fi 5 GHz, MacBook Pro M4 Pro).
+These numbers come from 120 Hz ScreenCaptureKit recordings of real gameplay, analyzed frame by frame (GTA 6, 5 GHz Wi-Fi, MacBook Pro M4 Pro).
 
-## Prérequis
+## Requirements
 
-- **Mac Apple Silicon** (M1 ou plus récent ; testé sur M4 Pro).
-- **macOS 26 ou plus récent** pour le moteur Apple, le meilleur. Sur macOS plus ancien, l'app bascule sur RIFE ou sur le shader.
-- **PS5** avec Remote Play activé.
-- Réseau : **Ethernet sur la PS5** idéalement. Sinon, du Wi-Fi 5 GHz pour la PS5 comme pour le Mac.
+- **Apple Silicon Mac** (M1 or newer; tested on an M4 Pro).
+- **macOS 26 or newer** for the Apple engine, which gives the best results. On older macOS the app falls back to RIFE or the shader.
+- **PS5** with Remote Play enabled.
+- Network: ideally **Ethernet on the PS5**. Otherwise, 5 GHz Wi-Fi for both the PS5 and the Mac.
 
-## 1. Préparer la PS5
+## 1. Set up the PS5
 
-1. **Paramètres → Système → Lecture à distance** → active **Activer la lecture à distance**.
-2. **Paramètres → Système → Économie d'énergie → Fonctionnalités disponibles en mode repos** → active **Rester connecté à Internet** et **Activer la mise sous tension de la PS5 depuis le réseau**. Tu pourras ainsi réveiller la console depuis le Mac.
-3. Garde **Paramètres → Système → Lecture à distance → Associer l'appareil** sous la main : il donne le code PIN demandé à l'étape 3.
+1. **Settings → System → Remote Play** → turn on **Enable Remote Play**.
+2. **Settings → System → Power Saving → Features Available in Rest Mode** → turn on **Stay Connected to the Internet** and **Enable Turning On PS5 from Network**. This lets the Mac wake the console.
+3. Keep **Settings → System → Remote Play → Link Device** at hand: it shows the PIN you'll need in step 3.
 
-## 2. Compiler l'app
+## 2. Build the app
 
 ```bash
 git clone https://github.com/w0dm4n/PS-WRAP-MAC-FG.git
 cd PS-WRAP-MAC-FG
 git submodule update --init --recursive
 
-scripts/setup-mac.sh                 # une seule fois : Homebrew deps (Qt 6, FFmpeg, SDL2, MoltenVK…)
-scripts/build-libplacebo-mac.sh      # une seule fois : libplacebo 7.360 (la 7.387 de Homebrew se bloque au lancement)
+scripts/setup-mac.sh                 # once: Homebrew deps (Qt 6, FFmpeg, SDL2, MoltenVK…)
+scripts/build-libplacebo-mac.sh      # once: libplacebo 7.360 (Homebrew's 7.387 deadlocks at launch)
 python3 -m venv .venv && .venv/bin/pip install protobuf
 PATH="$PWD/.venv/bin:$PATH" scripts/deploy-mac-fg.sh
 ```
 
-`deploy-mac-fg.sh` compile l'app et le wrapper RIFE (il télécharge [rife-metal](https://github.com/cinemore/rife-metal) v0.1.8 et lui applique un petit patch). Il produit une app autonome et signée ad hoc dans **`dist/PS-WRAP-MAC-FG.app`**.
+`deploy-mac-fg.sh` builds the app and the RIFE wrapper. It downloads [rife-metal](https://github.com/cinemore/rife-metal) v0.1.8 and applies a small patch. The result is a self-contained, ad-hoc signed app in **`dist/PS-WRAP-MAC-FG.app`**.
 
-Cette version a sa propre configuration (`com.ps-wrap-fg.PS-WRAP`) et son propre trousseau. Elle n'écrase jamais les réglages de PS-WRAP-MAC officiel, et elle réutilise l'association PS5 de l'officiel s'il est installé.
+This build keeps its own settings (`com.ps-wrap-fg.PS-WRAP`) and its own keychain entries. It never overwrites the official PS-WRAP-MAC settings, and it reuses the official app's PS5 pairing if that app is installed.
 
-## 3. Associer la PS5
+## 3. Pair the PS5
 
-Lance `dist/PS-WRAP-MAC-FG.app`. La PS5 apparaît dans la liste quand elle est allumée sur le même réseau. Clique dessus et entre ton identifiant PSN, puis le PIN affiché sur la PS5 (**Associer l'appareil**).
+Launch `dist/PS-WRAP-MAC-FG.app`. The PS5 shows up in the list when it is on and on the same network. Click it and enter your PSN account, then the PIN shown on the PS5 under **Link Device**.
 
-> Lance l'app depuis le Finder ou avec `open`, pas directement depuis un terminal. macOS donne l'autorisation « Réseau local » à l'app qui fait le lancement. Lancée depuis un terminal, l'app échoue avec *No route to host*.
+> Launch the app from Finder or with `open`, not directly from a terminal. macOS grants the "Local Network" permission to whichever app does the launching. Started from a terminal, the app fails with *No route to host*.
 
-## 4. Réglages conseillés
+## 4. Recommended settings
 
-Ce sont les réglages par défaut de cette version. Vérifie-les dans **Réglages** et dans le menu du stream :
+These are this build's defaults. Check them in **Settings** and in the stream menu:
 
-| Réglage | Valeur |
+| Setting | Value |
 |---|---|
-| Résolution / fps du stream | **1080p / 30 fps**. GTA 6 est à 30 fps, et c'est le Mac qui double. |
-| Débit | **50 Mbps** (descends à 30–40 si ça saccade en Wi-Fi) |
+| Stream resolution / fps | **1080p / 30 fps**. GTA 6 runs at 30 fps, and the Mac does the doubling. |
+| Bitrate | **50 Mbps** (drop to 30–40 if it stutters on Wi-Fi) |
 | Codec | **H.265** |
-| Request IDR Frame on FEC Failure | **Activé** (évite les freezes en H.265) |
-| Rendu (Placebo preset) | **High Quality + Spatial** (upscaling FSRCNNX) |
-| Frame Gen | **Activé**, moteur **Auto** (Apple → RIFE → shader) |
-| Snaps | **Clean** (aucun fantôme sur les changements de caméra). **Smooth** est plus fluide, mais peut laisser une trace d'un frame. |
-| Overlay manette | Désactivé |
+| Request IDR Frame on FEC Failure | **On** (prevents H.265 freezes) |
+| Rendering (Placebo preset) | **High Quality + Spatial** (FSRCNNX upscaling) |
+| Frame Gen | **On**, engine **Auto** (Apple → RIFE → shader) |
+| Snaps | **Clean** (no ghosting on camera cuts). **Smooth** is more fluid but can leave a one-frame trail. |
+| Controller overlay | Off |
 
-### Dans GTA 6
+### In GTA 6
 
-- **Flou de mouvement : désactivé.** Le flou trompe l'interpolation et crée des traînées.
-- Le reste n'a pas d'impact sur le frame gen. Garde le mode d'image que tu préfères.
+- **Motion blur: off.** Blur confuses the interpolation and causes trails.
+- Other settings don't affect frame gen. Keep the picture mode you prefer.
 
-### Lancer directement le stream en plein écran
+### Launch the stream directly in fullscreen
 
 ```bash
-open -n dist/PS-WRAP-MAC-FG.app --args --fullscreen stream "<nom de ta PS5>" <IP de ta PS5>
+open -n dist/PS-WRAP-MAC-FG.app --args --fullscreen stream "<your PS5 name>" <your PS5 IP>
 ```
 
-- `--fullscreen` garde les bonnes proportions. La PS5 envoie du 16:9 et l'écran d'un MacBook est en 16:10, d'où de fines bandes noires en haut et en bas.
-- `--zoom` remplit l'écran en coupant ~6 % de chaque côté (la minimap peut être rognée).
-- `--stretch` remplit l'écran en déformant l'image. Déconseillé.
+- `--fullscreen` keeps the correct aspect ratio. The PS5 outputs 16:9 and a MacBook screen is 16:10, so you get thin black bars at the top and bottom.
+- `--zoom` fills the screen by cropping ~6 % on each side (the minimap may get clipped).
+- `--stretch` fills the screen by distorting the image. Not recommended.
 
-Le nom et l'IP de ta PS5 sont visibles dans l'app, ou dans ta box internet.
+Your PS5's name and IP are shown in the app, or in your router's admin page.
 
-## Limites connues
+## Known limitations
 
-- **60 fps au maximum.** Le jeu sort 30 images par seconde et on en ajoute une entre chaque paire. Aller au-delà ajouterait de la latence et des artefacts.
-- **Latence :** l'interpolation attend l'image suivante, ce qui ajoute environ une image (~33 ms) à la latence du Remote Play. Ça va pour GTA, moins pour un jeu compétitif.
-- Les **objets très proches de la caméra** qui bougent vite (buissons, piquets, reflets) peuvent encore baver légèrement.
-- Sur un **changement de caméra brusque**, l'app affiche brièvement 30 fps plutôt qu'une image fausse (mode Clean).
-- Les **pertes Wi-Fi** font des creux (40–50 fps quelques instants). L'Ethernet règle ça.
+- **60 fps maximum.** The game outputs 30 frames per second and one frame is added between each pair. Going higher would add latency and artifacts.
+- **Latency:** interpolation has to wait for the next frame, which adds about one frame (~33 ms) on top of Remote Play's own latency. Fine for GTA, less so for competitive games.
+- **Objects very close to the camera** that move fast (bushes, posts, reflections) can still smear slightly.
+- On a **sudden camera cut**, the app briefly shows 30 fps rather than a wrong frame (Clean mode).
+- **Wi-Fi packet loss** causes dips (40–50 fps for a moment). Ethernet fixes this.
 
-## Variables d'environnement (debug)
+## Environment variables (debugging)
 
-| Variable | Effet |
+| Variable | Effect |
 |---|---|
-| `PSWRAP_VT_EDGEFILL=0` | désactive le remplissage des bords |
-| `PSWRAP_NO_REFRESH_HINT=1` | désactive le verrouillage de l'écran ProMotion à 120 Hz pendant le frame gen |
-| `PSWRAP_FG_MARK=1` | marque les images générées (pour vérifier dans un enregistrement) |
-| `PSWRAP_VT_DEBUG=1`, `PSWRAP_PRESENT_LOG=1` | journaux détaillés de l'interpolation et de la présentation |
+| `PSWRAP_VT_EDGEFILL=0` | disables edge fill |
+| `PSWRAP_NO_REFRESH_HINT=1` | stops pinning the ProMotion display at 120 Hz while frame gen is on |
+| `PSWRAP_FG_MARK=1` | marks generated frames (to check them in a recording) |
+| `PSWRAP_VT_DEBUG=1`, `PSWRAP_PRESENT_LOG=1` | verbose interpolation and presentation logs |
 
-## Crédits et licence
+## Credits and license
 
-- [PS-WRAP](https://github.com/iDevGIS/PS-WRAP) par iDevGIS : la base de ce fork (voir [README.PS-WRAP.md](README.PS-WRAP.md)).
-- [chiaki-ng](https://github.com/streetpea/chiaki-ng) / Chiaki : le client Remote Play open source.
+- [PS-WRAP](https://github.com/iDevGIS/PS-WRAP) by iDevGIS: the base of this fork (see [README.PS-WRAP.md](README.PS-WRAP.md)).
+- [chiaki-ng](https://github.com/streetpea/chiaki-ng) / Chiaki: the open-source Remote Play client.
 - [libplacebo](https://code.videolan.org/videolan/libplacebo), [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow).
-- [rife-metal](https://github.com/cinemore/rife-metal) (Apache-2.0) et les poids [Practical-RIFE](https://github.com/hzwer/Practical-RIFE) 4.25 (MIT).
+- [rife-metal](https://github.com/cinemore/rife-metal) (Apache-2.0) and the [Practical-RIFE](https://github.com/hzwer/Practical-RIFE) 4.25 weights (MIT).
 
-Distribué sous **GNU AGPL v3** (voir [LICENSE](LICENSE)), comme le projet d'origine.
+Released under the **GNU AGPL v3** (see [LICENSE](LICENSE)), like the original project.
 
-Projet non officiel, sans lien avec Sony Interactive Entertainment ni Rockstar Games. PlayStation, PS5 et DualSense sont des marques de Sony ; Grand Theft Auto est une marque de Take-Two Interactive.
+Unofficial project, not affiliated with Sony Interactive Entertainment or Rockstar Games. PlayStation, PS5 and DualSense are trademarks of Sony; Grand Theft Auto is a trademark of Take-Two Interactive.

@@ -28,7 +28,7 @@
 #ifdef __APPLE__
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #endif
-// PS-WRAP-FG: sans entrée manette (AFK), macOS mettait l'écran en veille → le stream se figeait.
+// PS-WRAP-FG: with no controller input (AFK), macOS put the display to sleep → the stream froze.
 static void pswrapHoldDisplayAwake(bool on)
 {
 #ifdef __APPLE__
@@ -421,7 +421,7 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	rumble_haptics_connected(false),
 	rumble_haptics_on(false)
 {
-	pswrapHoldDisplayAwake(true);   // PS-WRAP-FG: écran allumé pendant tout le stream (AFK = plus de freeze)
+	pswrapHoldDisplayAwake(true);   // PS-WRAP-FG: keep the display awake for the whole stream (no more AFK freeze)
 	mic_buf.buf = nullptr;
 	connected = false;
 	muted = true;
@@ -1430,7 +1430,7 @@ void StreamSession::OpenAudioOut(unsigned int channels, unsigned int rate)
 	spec.samples = audio_buffer_size / audio_out_sample_size;
 
 	SDL_AudioSpec obtained;
-	// PS-WRAP-FG: "Auto" = périphérique par défaut (sinon la réouverture après un blocage échoue avec "No such device")
+	// PS-WRAP-FG: "Auto" = default device (otherwise reopening after a stall fails with "No such device")
 	const bool pswrap_auto_dev = audio_out_device_name.isEmpty() || audio_out_device_name == QLatin1String("Auto");
 	const QByteArray pswrap_dev_name = audio_out_device_name.toUtf8();
 	audio_out = SDL_OpenAudioDevice(pswrap_auto_dev ? nullptr : pswrap_dev_name.constData(), false, &spec, &obtained, false);
