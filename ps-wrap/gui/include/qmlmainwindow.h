@@ -90,7 +90,10 @@ class QmlMainWindow : public QWindow
     Q_PROPERTY(bool pad3d READ pad3d WRITE setPad3d NOTIFY pad3dChanged)                               // จอยใน overlay แบบ 3D เอียงตามไจโร (ControllerOverlay3D.qml)
     Q_PROPERTY(bool lightbarHalo READ lightbarHalo WRITE setLightbarHalo NOTIFY lightbarHaloChanged)   // แสงเรืองขอบจอตามสีไฟจอย
     Q_PROPERTY(bool frameGen READ frameGen WRITE setFrameGen NOTIFY frameGenChanged)                   // เฟรมกลาง 60 → 120
-    Q_PROPERTY(bool frameGenSupported READ frameGenSupported NOTIFY frameGenChanged)                    // Direct Mapping + Vulkan
+    Q_PROPERTY(bool frameGenSupported READ frameGenSupported NOTIFY frameGenChanged)                    // Direct Mapping + Vulkan (or Apple VT engine)
+    Q_PROPERTY(int frameGenEngine READ frameGenEngine WRITE setFrameGenEngine NOTIFY frameGenChanged)   // PS-WRAP-MAC: 0 auto (Apple VT + RIFE) · 1 Apple VT · 2 shader · 3 RIFE
+    Q_PROPERTY(bool frameGenAppleAvailable READ frameGenAppleAvailable CONSTANT)
+    Q_PROPERTY(int frameGenSnaps READ frameGenSnaps WRITE setFrameGenSnaps NOTIFY frameGenChanged)   // PS-WRAP-MAC-FG: 0 Clean · 1 Smooth                       // PS-WRAP-MAC: macOS 26+ VT interpolation
     Q_PROPERTY(bool discordPresence READ discordPresence WRITE setDiscordPresence NOTIFY discordPresenceChanged)   // PS-WRAP: qmlmainwindow_pswrapdiscord.cpp
     Q_PROPERTY(bool discordShowGame READ discordShowGame WRITE setDiscordShowGame NOTIFY discordPresenceChanged)
     Q_PROPERTY(QString currentGame READ currentGame NOTIFY currentGameChanged)        // PS-WRAP: เกมที่เครื่องรันอยู่ระหว่างสตรีม ("" = ไม่รู้/หน้า Home/PSN remote)
@@ -237,6 +240,16 @@ public:
     bool frameGen() const;
     void setFrameGen(bool v);
     bool frameGenSupported() const;
+    int frameGenEngine() const;
+    void setFrameGenEngine(int v);
+    int frameGenSnaps() const;
+    void setFrameGenSnaps(int v);
+    bool frameGenAppleAvailable() const;
+    // PS-WRAP-MAC: Apple VT frame gen (decoder/frame thread asks; render thread publishes refresh/stream timing)
+    bool pswrapVtFrameGenWanted() const;
+    int pswrapVtEngineMode() const;   // PsWrapVtInterp engine for the current setting (0 VT · 1 RIFE · 2 hybrid)
+    Q_INVOKABLE bool frameGenRifeAvailable() const;
+    void pswrapSetVtFrameGenActive(bool active);
     bool discordPresence() const;       // PS-WRAP: qmlmainwindow_pswrapdiscord.cpp
     void setDiscordPresence(bool v);
     bool discordShowGame() const;
@@ -559,6 +572,11 @@ private:
     // PS-WRAP: Ambient light + frame generation (qmlmainwindow_pswrapvisual.cpp) — render thread เท่านั้น ยกเว้น atomic
     QAtomicInteger<int> pswrap_ambient_on = 0;
     QAtomicInteger<int> pswrap_fg_on = 0;
+    QAtomicInteger<int> pswrap_fg_engine = 0;          // PS-WRAP-MAC: 0 auto (VT+RIFE) · 1 Apple VT · 2 shader · 3 RIFE
+    QAtomicInteger<int> pswrap_vt_active = 0;
+    QAtomicInteger<int> pswrap_fg_snaps = 0;           // PS-WRAP-MAC-FG: 0 Clean · 1 Smooth          // PS-WRAP-MAC: Apple VT path is generating frames
+    QAtomicInteger<int> pswrap_refresh_mhz = 60000;    // PS-WRAP-MAC: display refresh (mHz), from the render loop
+    QAtomicInteger<int> pswrap_stream_interval_us = 0; // PS-WRAP-MAC: configured stream frame interval
     void pswrapAmbientParams(struct pl_render_params &params, const struct pl_frame &target_frame) const;
     void pswrapAmbientDecorate(struct pl_frame &target_frame, const struct pl_rect2df &video_rect);
     // true = วาดลงจอแล้ว (ข้าม pl_render_image ปกติ) · false = ใช้ทางปกติ
@@ -588,6 +606,10 @@ public:
     QString currentTitleId() const;
 private:
     class PsWrapFrameGen *pswrap_fg = nullptr;
+    void pswrapNotePresentFrame(const struct AVFrame *f);   // PS-WRAP-MAC-FG present-timing log
+    void pswrapLogPresent();
+    QAtomicInteger<int> pswrap_pres_pending = 0, pswrap_pres_gen = 0;
+    QAtomicInteger<qint64> pswrap_pres_arrival = 0;
     QAtomicInteger<int> pswrap_stream_frames = 0;    // PS-WRAP: นับต่อวินาที (timer ของ dropped frames)
     QAtomicInteger<int> pswrap_shown_frames = 0;
     int pswrap_stream_fps = 0;

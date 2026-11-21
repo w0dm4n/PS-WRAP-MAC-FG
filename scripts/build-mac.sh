@@ -14,6 +14,15 @@ done
 
 BREW=$(brew --prefix)
 export PKG_CONFIG_PATH="$BREW/lib/pkgconfig:$BREW/opt/openssl@3/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+# PS-WRAP-MAC-FG: libplacebo pinned to v7.360.1 (same as the official 0.14.0 build). Homebrew's 7.387 deadlocks at launch on macOS:
+# vk_sw_colorspace_hint → swapchain recreate + cleanup_retired_swapchains(UINT64_MAX) waits on a present fence while the main
+# thread is blocked in updateSwapchain(). Built by scripts/build-libplacebo-mac.sh into _deps/libplacebo-7.360.
+PL_PIN="$(cd .. && pwd)/_deps/libplacebo-7.360"
+if [ -f "$PL_PIN/lib/pkgconfig/libplacebo.pc" ]; then
+	export PKG_CONFIG_PATH="$PL_PIN/lib/pkgconfig:$PKG_CONFIG_PATH"
+else
+	echo "warning: $PL_PIN missing → using Homebrew libplacebo $(pkg-config --modversion libplacebo) (7.387 deadlocks at launch; run scripts/build-libplacebo-mac.sh)"
+fi
 PY=$(command -v python3)
 "$PY" -c 'import google.protobuf' 2>/dev/null || { echo "python3 ($PY) ไม่มี google.protobuf → รัน scripts/setup-mac.sh ก่อน"; exit 1; }
 
@@ -40,8 +49,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE="$TYPE" \
 	-DCMAKE_FIND_FRAMEWORK=LAST \
 	-DVulkan_INCLUDE_DIR="$BREW/opt/vulkan-headers/include" \
 	-DCURL_USE_LIBPSL=OFF -DCURL_USE_LIBSSH2=OFF -DUSE_NGHTTP2=OFF -DUSE_LIBIDN2=OFF \
-	-DCMAKE_C_FLAGS="-I$BREW/opt/ffmpeg/include" -DCMAKE_CXX_FLAGS="-I$BREW/opt/ffmpeg/include" \
-	-DQT_NO_PRIVATE_MODULE_WARNING=ON \
+	-DCMAKE_C_FLAGS="-I$BREW/opt/openssl@3/include -I$BREW/opt/ffmpeg/include" -DCMAKE_CXX_FLAGS="-I$BREW/opt/openssl@3/include -I$BREW/opt/ffmpeg/include" \
+	-DQT_NO_PRIVATE_MODULE_WARNING=ON -DOpus_INCLUDE_DIRS="$BREW/opt/opus/include" -DPSWRAP_FG_BUILD="${PSWRAP_FG_BUILD:-OFF}" \
 	"${LINK_FLAGS[@]}"
 cmake --build build $CLEAN --target chiaki
 echo "build ผ่าน ใช้เวลา $(( $(date +%s) - START ))s → ps-wrap/build/gui/PS-WRAP-MAC.app"

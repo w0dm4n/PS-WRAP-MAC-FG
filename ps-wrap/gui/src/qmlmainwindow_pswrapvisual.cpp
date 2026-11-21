@@ -10,6 +10,11 @@
 #include "qmlmainwindow.h"
 #include "pswrapframegen.h"
 #include "chiaki/time.h"
+#ifdef Q_OS_MACOS
+#include "pswrapvtframegen.h"
+#include "pswrapvtinterp.h"
+#include "macMetalLayer.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +23,8 @@ void QmlMainWindow::pswrapInitVisual()
 {
 	pswrap_ambient_on.storeRelease(settings->GetAmbientLight() ? 1 : 0);
 	pswrap_fg_on.storeRelease(settings->GetFrameGen() ? 1 : 0);
+	pswrap_fg_engine.storeRelease(settings->GetFrameGenEngine());
+	pswrap_fg_snaps.storeRelease(settings->GetFrameGenSnaps());
 }
 
 bool QmlMainWindow::ambientLight() const { return settings->GetAmbientLight(); }
@@ -65,7 +72,89 @@ void QmlMainWindow::setFrameGen(bool v)
 
 bool QmlMainWindow::frameGenSupported() const
 {
-	return bypass_frame_queue && render_backend == RenderBackend::Vulkan;
+	return (bypass_frame_queue && render_backend == RenderBackend::Vulkan) ||
+		(frameGenAppleAvailable() && settings->GetFrameGenEngine() != 2);
+}
+
+int QmlMainWindow::frameGenEngine() const { return settings->GetFrameGenEngine(); }
+
+int QmlMainWindow::frameGenSnaps() const { return settings->GetFrameGenSnaps(); }
+
+void QmlMainWindow::setFrameGenSnaps(int v)
+{
+	v = v ? 1 : 0;
+	if (v == settings->GetFrameGenSnaps())
+		return;
+	settings->SetFrameGenSnaps(v);
+	pswrap_fg_snaps.storeRelease(v);
+	emit frameGenChanged();
+}
+
+void QmlMainWindow::setFrameGenEngine(int v)
+{
+	v = std::clamp(v, 0, 3);
+	if (v == settings->GetFrameGenEngine())
+		return;
+	settings->SetFrameGenEngine(v);
+	pswrap_fg_engine.storeRelease(v);
+	emit frameGenChanged();
+}
+
+bool QmlMainWindow::frameGenAppleAvailable() const
+{
+#ifdef Q_OS_MACOS
+	return PsWrapVtFrameGen::osSupported();
+#else
+	return false;
+#endif
+}
+
+// decoder/frame thread: should the Apple VT path generate frames for the next decoded frame?
+bool QmlMainWindow::pswrapVtFrameGenWanted() const
+{
+#ifdef Q_OS_MACOS
+	if (pswrap_fg_on.loadAcquire() == 0 || pswrap_fg_engine.loadAcquire() == 2 || stream_session_active.loadAcquire() == 0)
+		return false;
+	if (!PsWrapVtFrameGen::osSupported())
+		return false;
+	// same rule as the shader path: the display must be ≥ 1.3x faster than the stream (30 fps stream on a 60/120 Hz screen)
+	const double refresh_hz = pswrap_refresh_mhz.loadRelaxed() / 1000.0;
+	const int interval_us = pswrap_stream_interval_us.loadRelaxed();
+	if (interval_us <= 0 || refresh_hz <= 1.0)
+		return false;
+	const double stream_fps = 1e6 / interval_us;
+	return refresh_hz >= stream_fps * 1.3;
+#else
+	return false;
+#endif
+}
+
+int QmlMainWindow::pswrapVtEngineMode() const
+{
+#ifdef Q_OS_MACOS
+	switch (pswrap_fg_engine.loadAcquire()) {
+	case 1: return 0;                                                   // Apple VT only
+	case 3: return PsWrapVtInterp::rifeAvailable() ? 1 : 0;             // RIFE only
+	default:   // auto: VT; snaps beyond its range → held (Clean) or RIFE-filled (Smooth)
+		return pswrap_fg_snaps.loadAcquire() != 0 && PsWrapVtInterp::rifeAvailable() ? 2 : 0;
+	}
+#else
+	return 0;
+#endif
+}
+
+bool QmlMainWindow::frameGenRifeAvailable() const
+{
+#ifdef Q_OS_MACOS
+	return PsWrapVtInterp::rifeAvailable();
+#else
+	return false;
+#endif
+}
+
+void QmlMainWindow::pswrapSetVtFrameGenActive(bool active)
+{
+	pswrap_vt_active.storeRelease(active ? 1 : 0);
 }
 
 // ---------------------------------------------------------------- ambient
@@ -209,6 +298,10 @@ void QmlMainWindow::pswrapAmbientDecorate(pl_frame &target_frame, const pl_rect2
 
 double QmlMainWindow::pswrapFrameGenPresentInterval(double stream_interval_s) const
 {
+	// PS-WRAP-MAC: Apple VT path already delivers frames on the display refresh grid (pswrapvtframegen.cpp) —
+	// a second fixed-rate pacer here would beat against it (held / dropped slots), so only keep a loose floor
+	if (pswrap_vt_active.loadAcquire() != 0)
+		return 0.0;   // 0 = no throttle (throttleFramePresentation resets its grid)
 	return pswrap_fg_active_render ? stream_interval_s * 0.5 : stream_interval_s;
 }
 
@@ -222,6 +315,9 @@ void QmlMainWindow::pswrapFrameGenSetActive(bool active)
 		if (pswrap_fg_active_reported == active)
 			return;
 		pswrap_fg_active_reported = active;
+#ifdef Q_OS_MACOS
+		pswrapSetHighRefreshHint(reinterpret_cast<void *>(winId()), active);   // PS-WRAP-MAC-FG: keep ProMotion at 120 Hz
+#endif
 		emit frameGenActiveChanged();
 	}, Qt::QueuedConnection);
 }
@@ -232,7 +328,8 @@ bool QmlMainWindow::pswrapFrameGenRender(const pl_frame *direct_frame, bool new_
 {
 	Q_UNUSED(video_rect);   // target_frame.crop = กรอบภาพอยู่แล้ว (push ใช้ตรงนั้น · present ตั้งเต็มจอเอง)
 	pswrap_fg_new_image = new_frame;   // วาดซ้ำ (UI เปลี่ยน) = ไม่ใช่ภาพใหม่ · เฟรมจริงที่รอต่อจากเฟรมกลางตั้งเป็น true ด้านล่าง
-	const bool want = pswrap_fg_on.loadAcquire() != 0 &&
+	const bool vt_active = pswrap_vt_active.loadAcquire() != 0;   // PS-WRAP-MAC: Apple VT already doubles the stream before it gets here
+	const bool want = !vt_active && pswrap_fg_on.loadAcquire() != 0 &&
 		render_backend == RenderBackend::Vulkan &&
 		stream_session_active.loadAcquire() != 0 &&
 		direct_frame && direct_frame->num_planes > 0 &&
@@ -242,7 +339,7 @@ bool QmlMainWindow::pswrapFrameGenRender(const pl_frame *direct_frame, bool new_
 		if (pswrap_fg)
 			pswrap_fg->reset();
 		pswrap_fg_pending.storeRelease(0);
-		pswrapFrameGenSetActive(false);
+		pswrapFrameGenSetActive(vt_active);   // VT: present every half stream interval + "FG" status
 		return false;
 	}
 	pl_gpu gpu = placeboGpu();

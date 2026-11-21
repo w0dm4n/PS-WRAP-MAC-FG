@@ -216,11 +216,15 @@ static SecAccessRef createOpenAccess()
 }
 #pragma clang diagnostic pop
 
-static CFMutableDictionaryRef baseQuery(const QString &target)
+#ifndef PSWRAP_STORE_ORG
+#define PSWRAP_STORE_ORG "PS-WRAP"
+#endif
+// PS-WRAP-MAC-FG: own keychain service ("PS-WRAP-FG"); reads fall back to the official "PS-WRAP" items (never written)
+static CFMutableDictionaryRef baseQuery(const QString &target, bool official = false)
 {
 	CFMutableDictionaryRef q = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	CFDictionarySetValue(q, kSecClass, kSecClassGenericPassword);
-	CFStringRef service = CFSTR("PS-WRAP");
+	CFStringRef service = official ? CFSTR("PS-WRAP") : CFSTR(PSWRAP_STORE_ORG);
 	CFDictionarySetValue(q, kSecAttrService, service);
 	CFStringRef account = target.toCFString();
 	CFDictionarySetValue(q, kSecAttrAccount, account);
@@ -288,8 +292,17 @@ Result read(const QString &target, QString *secret, QString *error)
 	CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
 	CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitOne);
 	CFTypeRef result = nullptr;
-	const OSStatus st = SecItemCopyMatching(q, &result);
+	OSStatus st = SecItemCopyMatching(q, &result);
 	CFRelease(q);
+#ifdef PSWRAP_FG_BUILD
+	if (st == errSecItemNotFound) {
+		q = baseQuery(target, true);
+		CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
+		CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitOne);
+		st = SecItemCopyMatching(q, &result);
+		CFRelease(q);
+	}
+#endif
 	if (st == errSecItemNotFound)
 		return Result::NotFound;
 	if (st != errSecSuccess)

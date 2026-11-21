@@ -139,6 +139,10 @@ if(APPLE)
 		src/macMetalLayer.mm
 		include/macNetInfo.h
 		src/macNetInfo.mm
+		include/pswrapvtinterp.h
+		src/pswrapvtinterp.mm
+		include/pswrapvtframegen.h
+		src/pswrapvtframegen.cpp
 	)
 elseif(WIN32)
 	list(APPEND SOURCE_FILES
@@ -285,7 +289,8 @@ if(NOT CHIAKI_ENABLE_FFMPEG_DECODER)
 	message(FATAL_ERROR "Chiaki GUI requires CHIAKI_ENABLE_FFMPEG_DECODER=ON")
 endif()
 if(APPLE)
-	target_link_libraries(chiaki "-framework AVFoundation" "-framework IOKit" "-framework QuartzCore" "-framework Security" "-framework CoreFoundation" "-framework CoreWLAN")   # PS-WRAP-MAC: CAMetalLayer (macMetalLayer.mm) · Keychain (pswrapsecrets.cpp) · Wi-Fi info (macNetInfo.mm)
+	target_link_libraries(chiaki "-framework AVFoundation" "-framework IOKit" "-framework QuartzCore" "-framework Security" "-framework CoreFoundation" "-framework CoreWLAN")
+	target_link_libraries(chiaki "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo")   # PS-WRAP-MAC: Apple frame interpolation (pswrapvtinterp.mm)   # PS-WRAP-MAC: CAMetalLayer (macMetalLayer.mm) · Keychain (pswrapsecrets.cpp) · Wi-Fi info (macNetInfo.mm)
 	# PS-WRAP-MAC: Qt permission plugin ของ macOS เป็น static — qt_add_executable จะ link ให้เองจาก Info.plist แต่ upstream ใช้ add_executable
 	# ไม่ link = "Could not find permission plugin for QCameraPermission" → Qt ถือว่าไม่ได้รับอนุญาต กล้อง/ไมค์เปิดไม่ได้
 	# PS-WRAP-MAC: โมเดล AI facecam (res/models) + ภาพ fx (res/fx-photo) ต้องอยู่ข้าง exe (โค้ดหาใน applicationDirPath เหมือน Windows)
@@ -300,14 +305,26 @@ if(APPLE)
 	endforeach()
 endif()
 
+# PS-WRAP-MAC-FG: side-by-side build with its own settings domain / keychain service / bundle id (doesn't touch the official app's data)
+option(PSWRAP_FG_BUILD "Build the PS-WRAP-MAC-FG variant (separate settings store, no auto-update)" OFF)
+if(PSWRAP_FG_BUILD)
+	target_compile_definitions(chiaki PRIVATE PSWRAP_FG_BUILD=1 PSWRAP_STORE_ORG="PS-WRAP-FG")
+	set(PSWRAP_BUNDLE_NAME PS-WRAP-MAC-FG)
+	set(PSWRAP_BUNDLE_ID com.idevgis.pswrap.fg)
+else()
+	target_compile_definitions(chiaki PRIVATE PSWRAP_STORE_ORG="PS-WRAP")
+	set(PSWRAP_BUNDLE_NAME PS-WRAP-MAC)
+	set(PSWRAP_BUNDLE_ID com.idevgis.pswrap)
+endif()
+
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fanalyzer")
 set_target_properties(chiaki PROPERTIES
 		MACOSX_BUNDLE TRUE
 		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/MacOSXBundleInfo.plist.in"
-		MACOSX_BUNDLE_BUNDLE_NAME PS-WRAP-MAC
+		MACOSX_BUNDLE_BUNDLE_NAME ${PSWRAP_BUNDLE_NAME}
 		MACOSX_BUNDLE_BUNDLE_VERSION ${PSWRAP_VERSION}
 		MACOSX_BUNDLE_COPYRIGHT "iDevGIS / chiaki-ng contributors (AGPLv3)"
-		MACOSX_BUNDLE_GUI_IDENTIFIER "com.idevgis.pswrap"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "${PSWRAP_BUNDLE_ID}"
 		MACOSX_BUNDLE_ICON_FILE pswrap.icns
 		RESOURCE "${RESOURCE_FILES}")
 

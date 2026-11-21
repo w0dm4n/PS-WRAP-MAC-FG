@@ -101,6 +101,9 @@ bool PsWrapUpdater::dismissed() const
 
 bool PsWrapUpdater::autoCheck() const
 {
+#ifdef PSWRAP_FG_BUILD
+	return false;   // PS-WRAP-MAC-FG: never replace this side-by-side build with an official release
+#endif
 	return QSettings().value(QLatin1String(kKeyAuto), true).toBool();
 }
 
@@ -155,6 +158,11 @@ void PsWrapUpdater::setState(const QString &s, const QString &err)
 
 void PsWrapUpdater::check(bool manual)
 {
+#ifdef PSWRAP_FG_BUILD
+	Q_UNUSED(manual);
+	setState(QStringLiteral("error"), tr("Updates are disabled in the PS-WRAP-MAC-FG build"));
+	return;
+#endif
 	if (state_ == QLatin1String("checking") || state_ == QLatin1String("downloading") || state_ == QLatin1String("ready"))
 		return;
 	if (manual || state_ != QLatin1String("available"))

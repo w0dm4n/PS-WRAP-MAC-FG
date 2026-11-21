@@ -78,9 +78,58 @@ static void pswrapCopySettings(QSettings &from, QSettings &to)
 	to.sync();
 }
 
+#ifdef PSWRAP_FG_BUILD
+// PS-WRAP-MAC-FG: own settings store (org "PS-WRAP-FG" → com.ps-wrap-fg.PS-WRAP). First launch: copy (read-only) the official
+// PS-WRAP settings — registered consoles / pairing keys included, so no re-pairing — without ever writing to the official domain.
+static void pswrapImportOfficialSettings()
+{
+	// fallbacks off: on macOS allKeys() would otherwise include NSGlobalDomain keys and never look empty
+	QSettings target(QStringLiteral(PSWRAP_STORE_ORG), QStringLiteral("PS-WRAP"));
+	target.setFallbacksEnabled(false);
+	if (target.value(QStringLiteral("pswrap/imported_from_official"), false).toBool() ||
+	    target.contains(QStringLiteral("registered_hosts/size")))
+		return;
+	QSettings official(QStringLiteral("PS-WRAP"), QStringLiteral("PS-WRAP"));
+	official.setFallbacksEnabled(false);
+	if (official.allKeys().isEmpty())
+		return;
+	pswrapCopySettings(official, target);
+	QSettings official_placebo(QStringLiteral("PS-WRAP"), QStringLiteral("pl_render_params"));
+	QSettings target_placebo(QStringLiteral(PSWRAP_STORE_ORG), QStringLiteral("pl_render_params"));
+	official_placebo.setFallbacksEnabled(false);
+	target_placebo.setFallbacksEnabled(false);
+	if (target_placebo.allKeys().isEmpty())
+		pswrapCopySettings(official_placebo, target_placebo);
+	const int profile_count = official.beginReadArray(QStringLiteral("profiles"));
+	QStringList profile_names;
+	for (int i = 0; i < profile_count; i++) {
+		official.setArrayIndex(i);
+		profile_names.append(official.value(QStringLiteral("settings/profile_name")).toString());
+	}
+	official.endArray();
+	for (const QString &profile : profile_names) {
+		if (profile.isEmpty())
+			continue;
+		QSettings from(QStringLiteral("PS-WRAP"), QStringLiteral("PS-WRAP-") + profile);
+		QSettings to(QStringLiteral(PSWRAP_STORE_ORG), QStringLiteral("PS-WRAP-") + profile);
+		from.setFallbacksEnabled(false);
+		to.setFallbacksEnabled(false);
+		if (to.allKeys().isEmpty() && !from.allKeys().isEmpty())
+			pswrapCopySettings(from, to);
+	}
+	target.setValue(QStringLiteral("pswrap/migrated_from_chiaki"), true);
+	target.setValue(QStringLiteral("pswrap/imported_from_official"), true);
+	target.sync();
+	fprintf(stderr, "PS-WRAP-FG: imported settings from the official PS-WRAP store (%d keys)\n", static_cast<int>(official.allKeys().size()));
+}
+#endif
+
 static void pswrapMigrateLegacyChiakiSettings()
 {
-	QSettings target(QStringLiteral("PS-WRAP"), QStringLiteral("PS-WRAP"));
+#ifdef PSWRAP_FG_BUILD
+	pswrapImportOfficialSettings();
+#endif
+	QSettings target(QStringLiteral(PSWRAP_STORE_ORG), QStringLiteral("PS-WRAP"));
 	if (target.value(QStringLiteral("pswrap/migrated_from_chiaki"), false).toBool() || !target.allKeys().isEmpty())
 		return;
 	QSettings legacy(QStringLiteral("Chiaki"), QStringLiteral("Chiaki"));
@@ -88,7 +137,7 @@ static void pswrapMigrateLegacyChiakiSettings()
 		return;
 	pswrapCopySettings(legacy, target);
 	QSettings legacy_placebo(QStringLiteral("Chiaki"), QStringLiteral("pl_render_params"));
-	QSettings target_placebo(QStringLiteral("PS-WRAP"), QStringLiteral("pl_render_params"));
+	QSettings target_placebo(QStringLiteral(PSWRAP_STORE_ORG), QStringLiteral("pl_render_params"));
 	if (target_placebo.allKeys().isEmpty())
 		pswrapCopySettings(legacy_placebo, target_placebo);
 	int profiles = 0;
@@ -104,7 +153,7 @@ static void pswrapMigrateLegacyChiakiSettings()
 		if (profile.isEmpty())
 			continue;
 		QSettings from(QStringLiteral("Chiaki"), QStringLiteral("Chiaki-") + profile);
-		QSettings to(QStringLiteral("PS-WRAP"), QStringLiteral("PS-WRAP-") + profile);
+		QSettings to(QStringLiteral(PSWRAP_STORE_ORG), QStringLiteral("PS-WRAP-") + profile);
 		if (to.allKeys().isEmpty() && !from.allKeys().isEmpty()) {
 			pswrapCopySettings(from, to);
 			profiles++;
@@ -146,7 +195,7 @@ int real_main(int argc, char *argv[])
 	qRegisterMetaType<ChiakiLogLevel>();
 
 	// PS-WRAP: ที่เก็บข้อมูลของเราเอง (registry HKCU\Software\PS-WRAP, %APPDATA%\PS-WRAP\PS-WRAP) ไม่ใช้ร่วมกับ chiaki-ng ที่ติดตั้งไว้
-	QGuiApplication::setOrganizationName(QStringLiteral("PS-WRAP"));
+	QGuiApplication::setOrganizationName(QStringLiteral(PSWRAP_STORE_ORG));   // PS-WRAP-MAC-FG: "PS-WRAP-FG"
 	QGuiApplication::setApplicationName(QStringLiteral("PS-WRAP"));
 	pswrapMigrateLegacyChiakiSettings();
 	QGuiApplication::setApplicationVersion(PSWRAP_VERSION);   // PS-WRAP: เวอร์ชันของเรา (upstream = CHIAKI_VERSION ใน log)
@@ -289,7 +338,12 @@ int real_main(int argc, char *argv[])
 	{
 		// PS-WRAP: single instance ต่อโปรไฟล์ — ถ้ามีตัวเดิมรันอยู่ ส่ง "activate" ให้มันดึงหน้าต่างขึ้นแล้วออก
 		const QString profile_key = use_alt_settings ? alt_settings.GetCurrentProfile() : settings.GetCurrentProfile();
-		const QString instance_name = QStringLiteral("pswrap-") + QString::fromLatin1(QCryptographicHash::hash(profile_key.toUtf8(), QCryptographicHash::Md5).toHex().left(12));
+#ifdef PSWRAP_FG_BUILD
+		const QString instance_prefix = QStringLiteral("pswrap-fg-");   // own instance: don't hand off to an official PS-WRAP running
+#else
+		const QString instance_prefix = QStringLiteral("pswrap-");
+#endif
+		const QString instance_name = instance_prefix + QString::fromLatin1(QCryptographicHash::hash(profile_key.toUtf8(), QCryptographicHash::Md5).toHex().left(12));
 		{
 			QLocalSocket probe;
 			probe.connectToServer(instance_name);

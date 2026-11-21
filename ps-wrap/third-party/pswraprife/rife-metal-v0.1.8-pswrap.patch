@@ -1,0 +1,42 @@
+diff --git a/Sources/RifeMetalCore/BackwardWarpKernel.swift b/Sources/RifeMetalCore/BackwardWarpKernel.swift
+index 60bd5b8..b860319 100644
+--- a/Sources/RifeMetalCore/BackwardWarpKernel.swift
++++ b/Sources/RifeMetalCore/BackwardWarpKernel.swift
+@@ -16,7 +16,7 @@ public final class BackwardWarpKernel {
+     public init(device: MTLDevice) throws {
+         let library: MTLLibrary
+         do {
+-            library = try device.makeDefaultLibrary(bundle: Bundle.module)
++            library = try rifeLoadLibrary(device)
+         } catch {
+             throw BackwardWarpError.pipelineCompilationFailed("library load failed: \(error)")
+         }
+@@ -111,7 +111,7 @@ public final class ConversionKernels {
+     public init(device: MTLDevice) throws {
+         let library: MTLLibrary
+         do {
+-            library = try device.makeDefaultLibrary(bundle: Bundle.module)
++            library = try rifeLoadLibrary(device)
+         } catch {
+             throw BackwardWarpError.pipelineCompilationFailed("library load failed: \(error)")
+         }
+@@ -149,3 +149,19 @@ public final class ConversionKernels {
+         self.rgbaTexTo4ChBuf = try device.makeComputePipelineState(function: f11)
+     }
+ }
++
++
++// PS-WRAP-MAC-FG modification (Apache-2.0 §4b): load the metallib from Contents/Resources of the host app (or an explicit
++// path) before falling back to SwiftPM's Bundle.module, whose app-bundle lookup path (the .app root) breaks code signing.
++func rifeLoadLibrary(_ device: MTLDevice) throws -> MTLLibrary {
++    var candidates: [URL] = []
++    if let p = ProcessInfo.processInfo.environment["RIFE_METAL_LIBRARY"] { candidates.append(URL(fileURLWithPath: p)) }
++    if let r = Bundle.main.resourceURL {
++        candidates.append(r.appendingPathComponent("RifeMetal_RifeMetalCore.bundle/Contents/Resources/default.metallib"))
++        candidates.append(r.appendingPathComponent("rife/default.metallib"))
++    }
++    for url in candidates where FileManager.default.fileExists(atPath: url.path) {
++        if let lib = try? device.makeLibrary(URL: url) { return lib }
++    }
++    return try device.makeDefaultLibrary(bundle: Bundle.module)
++}

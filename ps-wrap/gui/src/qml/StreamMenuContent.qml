@@ -593,6 +593,27 @@ FocusScope {
                     statusDot: Chiaki.window.frameGenActive ? Theme.success : "transparent"
                     onClicked: Chiaki.window.frameGen = !Chiaki.window.frameGen
                 }
+                // PS-WRAP-MAC-FG: fast camera snaps (beyond Apple VT's range) — Clean = hold real frame, Smooth = RIFE fills
+                Tile {
+                    glyph: Chiaki.window.frameGenSnaps == 1 ? "≈" : "◆"
+                    text: Chiaki.window.frameGenSnaps == 1 ? qsTr("Snaps: Smooth") : qsTr("Snaps: Clean")
+                    visible: !!Chiaki.window.frameGenAppleAvailable && Chiaki.window.frameGenEngine == 0 && Chiaki.window.frameGenRifeAvailable()
+                    on: Chiaki.window.frameGenSnaps == 0
+                    onClicked: Chiaki.window.frameGenSnaps = Chiaki.window.frameGenSnaps == 1 ? 0 : 1
+                }
+                // PS-WRAP-MAC: Frame Gen engine — Auto (Apple VT + RIFE for fast pans) → Apple VT → RIFE → GPU shader
+                Tile {
+                    readonly property var names: [qsTr("FG: Auto"), qsTr("FG: Apple"), qsTr("FG: Shader"), qsTr("FG: RIFE")]
+                    glyph: Chiaki.window.frameGenEngine == 2 ? "GPU" : (Chiaki.window.frameGenEngine == 3 ? "RIFE" : "AI")
+                    text: names[Chiaki.window.frameGenEngine] || names[0]
+                    visible: !!Chiaki.window.frameGenAppleAvailable
+                    on: Chiaki.window.frameGenEngine != 2
+                    onClicked: {
+                        const order = Chiaki.window.frameGenRifeAvailable() ? [0, 1, 3, 2] : [0, 2]
+                        const i = order.indexOf(Chiaki.window.frameGenEngine)
+                        Chiaki.window.frameGenEngine = order[(i + 1) % order.length]
+                    }
+                }
             }
 
             Card {

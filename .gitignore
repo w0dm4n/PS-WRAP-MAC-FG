@@ -60,3 +60,11 @@ Thumbs.db
 .secret
 .secret/
 .secret.*
+
+# ---- PS-WRAP-MAC-FG ----
+!/README.PS-WRAP.md
+/eval/
+/fgtools/
+/.venv/
+*.log
+.build/

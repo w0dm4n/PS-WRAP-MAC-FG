@@ -3248,6 +3248,14 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
         {
             QMutexLocker locker(&direct_frame_mutex);
             if (direct_pending_frame) {
+                // PS-WRAP-MAC-FG: the renderer hasn't picked up the previous frame yet. Never drop a real frame in favour
+                // of a generated (Apple VT frame gen) one — drop the generated frame instead.
+                const auto generated = [](const AVFrame *f) { return f && av_dict_get(f->metadata, "pswrap_generated", nullptr, 0); };
+                if (!generated(direct_pending_frame) && generated(frame.frame)) {
+                    av_frame_free(&frame.frame);
+                    dropped_frames_current.fetchAndAddRelaxed(1);
+                    return;
+                }
                 av_frame_free(&direct_pending_frame);
                 dropped_frames_current.fetchAndAddRelaxed(1);
             }
@@ -6025,6 +6033,7 @@ void QmlMainWindow::processDeferredSwapTask(qint64 submit_begin_us,
             if (present_swap_begin_us >= submit_us)
                 logLatencyStats("submit_to_swap", present_swap_begin_us - submit_us);
             pl_swapchain_swap_buffers(placebo_swapchain);
+            pswrapLogPresent();   // PS-WRAP-MAC-FG
 
             const qint64 swap_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
             logSwapInterval(swap_us);
@@ -6969,6 +6978,8 @@ void QmlMainWindow::render()
     const double stream_interval_s = stream_configured_frame_interval_ms > 0.0
         ? stream_configured_frame_interval_ms / 1000.0
         : 0.0;
+    pswrap_refresh_mhz.storeRelaxed(static_cast<int>(refresh_rate * 1000.0 + 0.5));             // PS-WRAP-MAC: for the Apple VT frame gen
+    pswrap_stream_interval_us.storeRelaxed(static_cast<int>(stream_interval_s * 1e6 + 0.5));
     const double vsync_duration = refresh_interval_s;
     const double present_interval_s = refresh_interval_s;
     const bool stream_active = stream_session_active.loadAcquire() != 0;
@@ -6998,7 +7009,7 @@ void QmlMainWindow::render()
     struct pl_frame direct_render_frame = {};
     bool pswrap_direct_new = false;   // PS-WRAP: frame gen — รอบนี้มีเฟรมใหม่
     const struct pl_frame *direct_frames[] = { &direct_render_frame };
-    const float direct_timestamps[] = { 0.0f };
+    const decltype(+pl_frame_mix{}.timestamps[0]) direct_timestamps[] = { 0 };
     if (bypass_frame_queue) {
         AVFrame *incoming = nullptr;
         bool reset_direct_frame = false;
@@ -7026,6 +7037,7 @@ void QmlMainWindow::render()
                     backend->disableZeroCopy();
             } else {
                 pswrap_direct_new = true;
+                pswrapNotePresentFrame(incoming);   // PS-WRAP-MAC-FG: present-timing log
             }
             av_frame_free(&incoming);
         }
@@ -7407,6 +7419,7 @@ void QmlMainWindow::render()
                 {
                     QMutexLocker locker(&placebo_swapchain_mutex);
                     pl_swapchain_swap_buffers(placebo_swapchain);
+            pswrapLogPresent();   // PS-WRAP-MAC-FG
                 }
                 const qint64 swap_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
                 logSwapInterval(swap_us);
@@ -8084,4 +8097,32 @@ bool QmlMainWindow::event(QEvent *event)
 QObject *QmlMainWindow::focusObject() const
 {
     return quick_window->focusObject();
+}
+
+// ---------------------------------------------------------------- PS-WRAP-MAC-FG present-timing log
+// PSWRAP_PRESENT_LOG=<file>: one line per swap that shows a new video image: swap_return_us generated arrival_us
+// (arrival = stream frame reached the decoder thread; for generated frames: arrival of the real frame after it)
+#include <cstdio>
+void QmlMainWindow::pswrapNotePresentFrame(const AVFrame *f)
+{
+    if (!f)
+        return;
+    const AVDictionaryEntry *g = av_dict_get(f->metadata, "pswrap_generated", nullptr, 0);
+    const AVDictionaryEntry *a = av_dict_get(f->metadata, "pswrap_arrival_us", nullptr, 0);
+    pswrap_pres_gen.storeRelaxed(g ? 1 : 0);
+    pswrap_pres_arrival.storeRelaxed(a ? strtoll(a->value, nullptr, 10) : 0);
+    pswrap_pres_pending.storeRelease(1);
+}
+
+void QmlMainWindow::pswrapLogPresent()
+{
+    static FILE *f = []() -> FILE * {
+        const QByteArray p = qgetenv("PSWRAP_PRESENT_LOG");
+        return p.isEmpty() ? nullptr : fopen(p.constData(), "w");
+    }();
+    if (!f || pswrap_pres_pending.fetchAndStoreAcquire(0) == 0)
+        return;
+    fprintf(f, "%lld %d %lld\n", static_cast<long long>(chiaki_time_now_monotonic_us()), int(pswrap_pres_gen.loadRelaxed()),
+            static_cast<long long>(pswrap_pres_arrival.loadRelaxed()));
+    fflush(f);
 }

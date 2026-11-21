@@ -1,0 +1,304 @@
+# PS-WRAP
+
+English · [ภาษาไทย](README.th.md)
+
+PS-WRAP is a PS4 / PS5 Remote Play client for Windows with a redesigned, modern interface that you can use with a controller alone.
+It is built on [chiaki-ng](https://github.com/streetpea/chiaki-ng) by the BudToZai team. The streaming core (`ps-wrap/lib/`) comes from upstream.
+
+▶️ **Demo stream:** [youtube.com/live/8sWkgmj81Aw](https://www.youtube.com/live/8sWkgmj81Aw).
+
+💬 **Discord:** [discord.gg/6VTSxu8JRf](https://discord.gg/6VTSxu8JRf) for help, news and beta builds.
+
+🌐 **Website:** [www.ps-wrap.com](https://www.ps-wrap.com)
+
+![Playing with the vertical 9:16 window open](screenshots/stream-916.jpg)
+
+*Playing with the 9:16 window open: overlays on the game screen, and next to it the vertical picture for Shorts / TikTok / Reels with an image on top and the facecam below (Blur fill layout).*
+
+## Screenshots
+
+### Home screen
+
+![Home screen](screenshots/main.png)
+
+- One card per console: PS5 / PS4 art by model, a status chip (Ready / Standby / Remote) and a big **Play** button.
+- The bottom bar has controller hints on the left and status chips on the right: microphone, speaker (with volume), camera, controller, **Recordings**, **Screenshots**, Discovery and **ⓘ About**. Click a chip to open its page or menu; click outside a menu to close it.
+- Everything works with a controller: ✕ Play, △ wake up, □ hide, L1 PIN, R3 add console, ☰ Settings. The hints are buttons too, so you can click them with the mouse.
+
+| ⓘ About and credits | Controllers | Microphone test |
+|---|---|---|
+| ![About](screenshots/about.png) | ![Controllers](screenshots/controllers.png) | ![Microphone test](screenshots/mic-test.png) |
+| Version, credits for chiaki-ng and Chiaki, every bundled library with its license, and a **Licenses** button. | Connected controllers, connection type and battery, plus a live preview that lights up as you press buttons. **Rumble Boost** with a △ vibration test and a **Light Bar** test (□) that lights the controller and its picture. | Pick the microphone and set noise reduction, speaker echo removal, mic boost and noise gate while you hear the result. |
+
+### While streaming
+
+![Stream with overlays](screenshots/stream-overlay.jpg)
+
+The game with every overlay turned on. Each one can be dragged and resized (click it to edit, or use **Move** in the stream menu with a controller):
+
+- **Live chat** (left): YouTube and Twitch messages, with colored names and badges.
+- **Clock and play time** (top right).
+- **Mic visualizer**: shows that you are muted or speaking; click it to mute.
+- **Network stats**: bitrate, ping at connect, packet loss and dropped/lost frames.
+- **Controller overlay** (bottom right): buttons light up and sticks move as you play.
+
+![3D controller overlay: lying flat, held with buttons pressed, steering](screenshots/controller-3d.jpg)
+
+**3D Pad** (stream menu › OVERLAY) turns the controller overlay into a 3D DualSense that tilts the way you hold your controller (gyro): flat on the desk you see it from above, held you see its face, and it leans when you steer. Pressed buttons light up pink, L2/R2 glow as you pull them, sticks lean and the light bar takes the game's colour. Off by default; PCs that can't show 3D keep the flat picture.
+
+![Status bar while playing](screenshots/stream-statusbar.jpg)
+
+**Status bar**: move the mouse to the bottom of the window and a bar appears. From left to right: ☰ the stream menu, mute the mic, speaker and volume, facecam, controller overlay, record, screenshot, **Go Live**, **Overlays shared / only me**, and network (Mbps; click for stream stats). With **only me**, your overlays stay on your screen and don't go into what friends see in Link, your recordings or Go Live (Link labels, friends' cameras and hearts still do). Click 📌 to keep the bar on screen. Clicks outside the bar still go to the game.
+
+![Stream menu](screenshots/stream-menu.jpg)
+
+The stream menu (Ctrl+O, L1+R1+L3+R3, ☰ on the status bar, or the tray):
+
+- **Top row**: **End Stream**, **Record**, mic on/off, microphone and speaker devices, volume, live stream stats, and **✕** to close the menu.
+- **PICTURE**: Zoom, Stretch, Glow, **Size ▾** (exact 16:9 window sizes) and Display settings.
+- **QUALITY**: Default, HQ, HQ + Spatial, HQ + Advanced, Custom and **Frame Gen** (60 → 120 fps).
+- **OVERLAY**: Pad, **3D Pad**, Cam, Spectrum, Clock, Chat, Stats, Light, Stack and **Move** (pick which overlay to move or resize). While arranging the Stack, **⇱** takes one overlay out to its own spot and **⇲** puts it back (□ then △ on a controller).
+- **CAPTURE**: Instant Replay (on/off, length, Save), Screenshot, **Go Live** and **9:16**.
+
+The cards wrap onto a new line on narrow windows instead of being cut off. With a controller, the D-pad moves to the nearest button on screen, ✕ presses and ◯ closes.
+
+![Picture size](screenshots/picture-size.jpg)
+
+**Size ▾** sets the window so the video area is exactly 720p, 900p, 1080p or 1440p (16:9, no black bars, real pixels even at 150 % display scaling). The **STREAM** tag marks the size that matches the stream resolution, and sizes larger than your screen are hidden.
+
+### PS-WRAP Link (beta)
+
+![A friend watching in a web browser, with chat and reactions](screenshots/link-friend.jpg)
+
+**PS-WRAP Link** lets friends watch your game in a web browser, chat, send reactions, talk, and play when you hand them the controller. Turn it on with **Link** in the stream menu (CAPTURE) or **Ctrl+Shift+J**; the invite link is copied for you. Up to 4 friends open it in Chrome, Edge or Safari, with nothing to install (about 20 ms of delay on a home network in our tests).
+
+**Room type** (Link panel › ROOM TYPE): **Direct P2P** is up to 4 friends connected straight to your PC, with the lowest delay. **Stage Broadcast** sends the game once through the PS-WRAP server to a bigger audience (up to 15 in the beta): they watch at 1080p, chat, react and can ask for the controller, and your upload stays the same however many watch. **Both** gives the first 4 a direct seat and puts everyone after them on the Stage, with the same invite link.
+
+![Link on your screen: two starred friends playing together, the Link card with stars and connection icons, and friends' facecams](screenshots/link-host.jpg)
+
+<img src="screenshots/link-phone.jpg" alt="On-screen controller on a phone" width="260" align="right">
+
+- **The controller**: a friend asks, you press **Give controller** on the Link card (Ctrl+Shift+G) and **Take back** when you want it (Ctrl+Shift+U). Friends play with their own controller, keyboard and mouse (Standard, Ghost of Tsushima PC keys, Shooter and Racing layouts), or the on-screen controller on a phone.
+- **Chat and voice**: messages show in the Live Chat overlay with the friend's picture, ❤️ 🌸 🤘 🙏 reactions float over the game, and friends can talk on their mic. Mute anyone from the Link card. Friends set the game and voice volume separately with the 🔊 button. The game's vibration goes to the friend's controller (Chrome, Edge, Safari on Mac; not iPhone), and a friend who refreshes gets straight back in.
+- **Friends hear each other** (each friend hears you and the others, never their own voice back), and can set their own mic volume.
+- **Facecam**: friends press **Cam** (or pick a picture or GIF instead) and appear as circles at the bottom left of the picture, with a blue ring while they talk. You can turn a friend's camera off like muting a mic.
+- **Stars**: press ☆ next to a friend to remember them. A starred friend gets the controller without asking you, and if someone already has it, they play together (everyone's buttons count, everyone's controller vibrates). Your controller overlay shows their presses too.
+- **Link card**: shows who is talking (a live sound wave), who has the controller (a green row), how each friend is connected (P2P or Stage) and pops each friend's reactions from their picture. It keeps one width so nothing jumps around. Drag it by its top row anywhere on the picture, or fold it with **–** so it doesn't cover the game.
+- **For friends**: **Check devices** before joining (or **Devices** in the room) tests their controller with a drift and edge test, mic (with playback), speakers, keyboard layout and camera. They pick their own mic and camera, and a tap on **Playing** gives the controller back. If the browser can't vibrate their DualSense, **Connect DualSense** there makes it vibrate (Chrome/Edge).
+- **Motion controls (beta)**: for games that use the controller's gyro, a friend holding the controller can tilt too: **Tilt** in the bar at the bottom of the friend page on a phone (iPhone asks once), or a DualSense connected in **Check devices** (Chrome/Edge). While they tilt, the PS5 gets their tilt instead of yours, and the 3D controller overlay leans with them.
+- **Privacy while live**: the QR code in the Link panel stays hidden until you press *Show*, and **New link** cancels the old one.
+- **Quality**: friends pick Auto, 1080p High (sharper, about 15 Mbps), 1080p, 720p or 480p. Stage viewers get 1080p.
+- **HDR**: works; friends get an SDR version of the picture (browsers can't show HDR streams).
+- **Team access**: the PS-WRAP team can only watch a room if you press Allow on the request (view only). While they watch, your friends' profile pictures go to their view directly, not through the server.
+- **Beta limits**: Stage viewers can't use their mic until they get the controller; friends' voices aren't recorded; no touchpad swipes; up to 2 rooms per internet connection. What our server logs is in the [Privacy Policy](PRIVACY.md#ps-wrap-link-beta).
+
+<br clear="right">
+
+![Check devices on the friend page: live controller, drift test, DualSense vibration, trigger pressure](screenshots/link-devices.jpg)
+
+### Vertical 9:16 and Go Live
+
+| Vertical 9:16 window | Settings › Go Live and chat on screen |
+|---|---|
+| ![9:16 window](screenshots/vertical-916.png) | ![Go Live settings](screenshots/go-live.png) |
+| A live vertical picture for Shorts / TikTok / Reels, here in Blur fill with a banner image, an animated "LIVE" GIF and the chat card. Choose Cam + game, Center crop or Blur fill; drag the facecam, the crop, your images and the chat card; add PNG/JPG/GIF images from a file or a link (Giphy); and record 1080 × 1920 clips. | Add YouTube, Twitch, Facebook, Kick or custom RTMP(S) destinations with their own bitrate, mark any of them Vertical 9:16, and set up the on-screen chat (YouTube source, API key, Twitch channel). Keys stay in Windows Credential Manager. |
+
+![Recording a vertical clip](screenshots/recording-916.jpg)
+
+Recording a 9:16 clip while playing: the button turns into **■ Stop** with the elapsed time, and a blinking REC dot labelled **9:16** appears at the top left of the game screen (on screen only, not in the file).
+
+### Connection check, updates and PSN sign-in
+
+![Connection check](screenshots/connection-check.png)
+
+**Connection check** (**Test** on a console card, or Settings › Stream › **Check my connection**): measures the cable or Wi-Fi link to the console (speed, Wi-Fi standard, band and signal) and the ping, jitter and loss to it, then recommends resolution, frame rate, bitrate and codec next to your current values. **Apply** sets them.
+
+| Update inside the app | PSN sign-in |
+|---|---|
+| ![Update](screenshots/update.png) | ![PSN sign-in](screenshots/psn-signin.png) |
+| When a new version is out, an **Update x.y.z** chip appears on the home screen bar. **Update now** downloads it and checks its SHA-256; **Restart and update** puts it in place and opens PS-WRAP again, with your settings kept. | **Login to PSN** opens Sony's sign-in page in a window inside PS-WRAP. When you finish, it closes by itself and PS-WRAP completes the setup: no link to copy, no address to paste back. |
+
+### Settings
+
+| Video | Stream |
+|---|---|
+| ![Settings › Video](screenshots/settings-video.png) | ![Settings › Stream](screenshots/settings-stream.png) |
+| Cards for picture quality (render preset up to HQ + Advanced Spatial upscaling, display settings), the stream window, and the renderer (decoder, V-Sync, frame delivery, Vulkan / OpenGL). | Resolution, frame rate, bitrate and codec, separately for PS5 / PS4 and for home (local) and remote play, plus **Check my connection** and network warnings. |
+
+![Settings › Keyboard](screenshots/settings-keys.png)
+
+Settings › Keyboard: every PlayStation button mapped to a keyboard key, grouped into cards (face buttons, D-pad, shoulders and triggers, system, sticks), all reachable with a controller. The sidebar groups the pages, each with an icon, into Play (General, Stream, Video, Audio, Game presets), Controls (Controllers, Keyboard), Connection (Consoles, Remote Play), Create (Facecam, Recording, Go Live) and App (System); every page is split into titled cards. On a small window the sidebar shrinks to icons and each setting stacks with its name on top, so nothing runs off the edge; the mouse wheel scrolls every list.
+
+![Console PIN with a controller](screenshots/console-pin.png)
+
+Console PIN with a controller, like the passcode screen on the PS5: each button types one digit (◀1 ▲2 ▶3 ▼4 R1 5 R2 6 L1 7 L2 8 △9 □0), the fourth digit confirms by itself and Circle deletes. Used when connecting to a console with a login PIN (also over PSN) and in *Set console pin* on the home screen.
+
+### System tray and disconnect
+
+| System tray menu | Disconnect |
+|---|---|
+| ![Tray menu](screenshots/tray-menu.png) | ![Disconnect dialog](screenshots/disconnect.png) |
+| Open the stream menu or Settings, set the picture size, open the 9:16 window, record, toggle overlays, choose the facecam effect and background, switch the microphone, record presets, Instant Replay, screenshots, Go Live and always on top, all without touching the game window. | Ending a stream asks whether to keep the console on. **Disconnect** is the default, so a stray button press can't put your PS5 to sleep. |
+
+## Download
+
+Get the latest zip from [Releases](https://github.com/iDevGIS/PS-WRAP/releases), unzip it anywhere and run `PS-WRAP.exe`. You don't need to install anything.
+If you used chiaki-ng on the same PC, PS-WRAP copies its settings and registered consoles on first launch (chiaki-ng's data is left untouched).
+
+## Best tested settings
+
+These settings gave the sharpest and smoothest picture in our tests: PS5 on ordinary home Wi-Fi 5 (802.11ac, about 1.5 ms ping), NVIDIA RTX 4090, 165 Hz display, playing Ghost of Yōtei. The picture looked sharper than playing on the TV connected to the console.
+
+| Setting | Where | Value | Why |
+|---|---|---|---|
+| Resolution | Settings › Stream › Local | **1080p** | The highest Remote Play allows |
+| FPS | Settings › Stream › Local | **60 fps** | 30 fps is clearly less smooth |
+| Bitrate | Settings › Stream › Local | **100 Mbps** (max) | Worked on Wi-Fi 5 in our test; lower it if Stats shows packet loss |
+| Codec | Settings › Stream › Local | **H.265** | Better picture than H.264 at the same bitrate |
+| Hardware Decoder | Settings › Video | **cuda** on NVIDIA (auto picks a GPU decoder on others) | Decodes on the graphics card |
+| Render Preset | Settings › Video (or stream menu › QUALITY) | **HQ + Advanced Spatial Upscaling** | Upscales 1080p with an AI upscaler (FSRCNNX) instead of a plain stretch; this is what makes it look sharper than the console |
+| Frame Delivery | Settings › Video | **Direct Mapping** (default) | Lowest delay; Frame Gen needs it |
+
+**Playing over the internet** (Settings › Stream › Remote): keep 1080p / 60 fps but set the bitrate to about **20–30 Mbps**. Remote Play uses your home upload speed, and 100 Mbps will stutter or drop on most connections.
+
+**Optional, in the stream menu (Ctrl+O):**
+- **Frame Gen** (QUALITY): 60 → 120 fps on a display faster than 60 Hz. Smoothest with G-SYNC / FreeSync (VRR) or a 120 Hz display; on a fixed 144/165 Hz display without VRR, frame timing can feel uneven, so compare it on and off. Adds about 8 ms of delay.
+- **Glow** (FIT): fills black bars with a soft glow from the game. Useful on ultrawide screens.
+- **Light** (OVERLAY): a glow around the picture in the controller light color, when the game sets one.
+
+## Reporting problems
+
+PS-WRAP is an independent fork, **not an official chiaki-ng release**. Please report PS-WRAP bugs and ideas in this repository's [Issues](https://github.com/iDevGIS/PS-WRAP/issues) or in the **#help** forum on our [Discord](https://discord.gg/6VTSxu8JRf), not to chiaki-ng.
+
+**Easiest way: run `PS-WRAP-Diagnostics.exe`** (in the PS-WRAP folder, next to `PS-WRAP.exe`). It works even when PS-WRAP itself won't open:
+
+1. It checks your PC by itself: PS-WRAP files, Windows, graphics driver, whether Vulkan works or freezes, overlay apps that hook into games, recent crashes and freezes (Windows Error Reporting and Event Log), and PS-WRAP's logs.
+2. **Test launch** opens PS-WRAP and records everything it prints, with a detailed (verbose) log if you like. If PS-WRAP stops responding, the tool saves the exact place where it is stuck. **Test with OpenGL (safe mode)** does the same without Vulkan.
+3. **Save report (.zip)** puts one zip on your Desktop to attach to an issue. **Copy summary** gives a short text that fits in one Discord message. **Report on GitHub** opens a new issue with the summary already filled in.
+
+![PS-WRAP Diagnostics](screenshots/diagnostics.png)
+
+If PS-WRAP freezes with "Not responding" as soon as it opens, click **Use OpenGL (fix freeze)**. PS-WRAP will then start with OpenGL instead of Vulkan. You can switch back with the same button.
+
+The report never contains your PSN sign-in, stream keys, console registration or channel names. Your Windows user name, PC name, home folder and internet IP address are replaced with placeholders.
+
+## What's new compared to chiaki-ng
+
+- **A new interface throughout**:
+  - Console-card home screen, and Settings with an icon sidebar grouped by task (Play, Controls, Connection, Create, App) and titled cards on every page.
+  - Enter the console PIN with a controller (PS5-style keypad).
+  - A redesigned stream menu and a new Keys page.
+  - Responsive at any window size.
+  - Every screen works with a controller (Steam Deck / TV friendly).
+- **PS-WRAP Link (beta)**: friends watch in a web browser, chat, react, talk and play when you hand over the controller ([more](#ps-wrap-link-beta)).
+- **Overlays while streaming**: controller (flat or a **3D DualSense that tilts with your controller**), network stats, facecam, mic visualizer, clock and **live chat (YouTube + Twitch)**. Place each one freely, or turn on **Stack** to line them all up in one column at the same width and move, resize and reorder the whole column at once (take single overlays out of it with ⇱). Keep them to yourself with **Overlays only me** so friends, recordings and Go Live get the clean game.
+- **Picture**:
+  - **Frame Gen**: an in-between frame for every stream frame, 60 → 120 fps on fast displays (motion estimated on the GPU).
+  - **Glow**: black bars around the picture become a soft glow from the game (great on ultrawide screens).
+  - **Light**: the controller light color set by the game glows around the picture and on the controller overlay.
+  - AI upscaling (FSRCNNX) from the QUALITY presets — see [Best tested settings](#best-tested-settings).
+- **Facecam**:
+  - Any camera, including DirectShow virtual cameras.
+  - Zoom, pan, mirror and circle.
+  - Background removal with chroma key or AI (no green screen needed).
+  - 3D face effects that follow your head (MediaPipe Face Landmarker).
+- **Capture**:
+  - Clip recording with every overlay (H.264 / HDR HEVC, three audio tracks).
+  - Instant Replay and chapter markers.
+  - One-button screenshots, with HDR PNG for HDR streams.
+  - Output at stream resolution, 1440p or **4K (upscaled)**.
+- **Go Live**:
+  - Stream to YouTube, Twitch, Facebook, Kick and custom RTMP(S) at the same time.
+  - Up to 4K on YouTube/Custom.
+  - **Vertical 9:16** destinations for TikTok / Shorts / Reels.
+  - Stream keys are kept in Windows Credential Manager.
+- **Vertical 9:16 window**:
+  - Live preview with three layouts.
+  - Drag the facecam and the crop.
+  - Record 1080 × 1920 clips.
+- **Microphone**:
+  - RNNoise noise reduction and speaker echo removal that can be changed mid-stream.
+  - Boost and noise gate.
+  - Mic test page.
+- **Updates inside the app**: an **Update** chip when a new version is out; one click downloads, checks and installs it, then reopens PS-WRAP.
+- **Connection check**: measures the link and ping to the console and recommends (and applies) resolution, frame rate, bitrate and codec.
+- **Easy PSN sign-in**: Sony's sign-in page opens inside PS-WRAP and the setup finishes by itself (Microsoft Edge WebView2, part of Windows 10/11).
+- **Status bar while playing**: move the mouse to the bottom of the window for the mic, speaker, facecam, record, screenshot, Go Live and network chips; pin it to keep it on screen. On a PS4 played on your home network it also shows the name of the running game (also under the clock overlay); a PS5 doesn't report it.
+- **New stream menu**: compact cards (Picture, Quality, Overlay, Capture) that wrap instead of overflowing, a ✕ close button, and controller navigation that follows the layout.
+- **Speaker**: pick the audio output device and volume from the home screen chip, the stream menu or the tray, and switch it mid-stream. The volume goes up to **200%** for quiet games (above 100% PS-WRAP boosts the sound itself, with a limiter so it doesn't crackle; recordings and Link keep the normal level). (The PS5 sends stereo audio over Remote Play; for virtual surround, turn on Windows Sonic or Dolby Atmos for Headphones in Windows.)
+- **Stay Awake**: Settings › General › While Streaming keeps the console out of rest mode during a stream (moves the left stick a tiny bit after 10 minutes with nobody pressing anything).
+- **Game presets**: resolution, bitrate, overlays and more per game, applied automatically.
+- **Controller vibration and light**: **Rumble Boost** makes the controller vibrate harder, up to 300%, including games that send plain rumble (Settings › Controllers › Vibration, or the controller panel). The controller panel tests vibration (△, L1 / R1 to adjust) and the light bar in six colors (□); closing it stops the vibration and restores the light.
+- **Discord status**: your Discord profile shows *Playing PS-WRAP* with the game on the console, Remote Play / Live / Recording and the play time (talks to the Discord app directly, no extra DLLs).
+- **Frame rate in the stats card**: fps from the console and fps shown on screen (about 120 with Frame Gen).
+- **Diagnostics tool** (`PS-WRAP-Diagnostics.exe`): checks the PC, catches where PS-WRAP freezes, fixes Vulkan freezes with one click and packs everything into one zip to send. See [Reporting problems](#reporting-problems).
+- **Picture size presets** (720p–1440p, exact 16:9 with no black bars), system tray menu, hide to tray, always on top, single instance.
+- **Stability fixes**:
+  - Mid-stream crashes and freezes.
+  - Buttons that stayed pressed on the PS5 after packet loss.
+  - Ghost overlays on Vulkan after resizing.
+  - Buttons not working after closing a menu.
+  - Details are in [CHANGELOG.md](CHANGELOG.md).
+- Its own data storage (`HKCU\Software\PS-WRAP`, `%APPDATA%\PS-WRAP`), separate from chiaki-ng.
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| `ps-wrap/` | All source code (based on chiaki-ng). The UI is in `ps-wrap/gui/src/qml/`; our C++ files start with `pswrap*`. |
+| `scripts/` | PowerShell scripts: install MSYS2 and dependencies, build, run, deploy, and test tools. |
+| `screenshots/` | The images in this README. |
+
+## Build (Windows, MSYS2 mingw64)
+
+```powershell
+git clone --recurse-submodules https://github.com/iDevGIS/PS-WRAP.git
+cd PS-WRAP
+.\scripts\setup-msys2.ps1        # install MSYS2 + dependencies (once)
+.\scripts\setup-extra-deps.ps1   # libplacebo / SDL that must be built from source (once)
+.\scripts\build.ps1              # → ps-wrap\build\gui\PS-WRAP.exe
+.\scripts\run.ps1                # run the build
+.\scripts\deploy.ps1 -StartMenu  # portable folder dist\PS-WRAP + a Start Menu shortcut
+```
+
+Use PowerShell 7 (`pwsh`). The scripts contain Thai text that Windows PowerShell 5 reads incorrectly.
+AI facecam features need `onnxruntime.dll` (ONNX Runtime 1.30 win-x64) next to `PS-WRAP.exe`.
+
+## Build (macOS, Homebrew)
+
+```bash
+git clone --recurse-submodules https://github.com/iDevGIS/PS-WRAP.git
+cd PS-WRAP
+scripts/setup-mac.sh    # Homebrew dependencies + python protobuf (once)
+scripts/build-mac.sh    # → ps-wrap/build/gui/PS-WRAP-MAC.app
+scripts/run-mac.sh      # run the build
+```
+
+Needs Xcode (or Command Line Tools) and Homebrew. Tested on Apple Silicon (macOS 26, Xcode 26). The macOS build has the streaming core, the UI and the controller support; Stream keys and the Link host key go to the macOS Keychain, the facecam uses AVFoundation and Link encodes with VideoToolbox. Windows-only parts (WebView2 PSN sign-in, AI facecam effects, the Diagnostics tool, the updater) are stubbed out and sign-in falls back to the paste-the-URL flow.
+
+## Credits
+
+PS-WRAP would not exist without these projects. The same credits are shown in the app under the ⓘ **About** chip on the home screen (also in Settings › System).
+
+- **[chiaki-ng](https://github.com/streetpea/chiaki-ng)** by Street Pea and contributors. PS-WRAP forked from commit `a9a2805` (1.10.0 development); the whole Remote Play streaming core is theirs.
+- **[Chiaki](https://git.sr.ht/~thestr4ng3r/chiaki)** by Florian Märkl and contributors, the original that chiaki-ng is based on.
+- Upstream submodules: curl, nanopb, jerasure, gf-complete, munit, cpp-steam-tools, oboe, borealis.
+- [Qt 6](https://www.qt.io) (LGPL-3.0), [libplacebo](https://code.videolan.org/videolan/libplacebo) (LGPL-2.1), [FFmpeg](https://ffmpeg.org) (GPL build), [SDL](https://libsdl.org) (zlib).
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) (MIT); headers are in `ps-wrap/third-party/onnxruntime`.
+- AI models (Apache-2.0, Google MediaPipe):
+  - Selfie Segmentation (ONNX by onnx-community).
+  - BlazeFace (ONNX by garavv/blazeface-onnx).
+  - Face Landmarker 478 points (ONNX by senty-au).
+- [RNNoise](https://github.com/xiph/rnnoise) and SpeexDSP (BSD) for microphone noise reduction and echo cancellation.
+- [libdatachannel](https://github.com/paullouisageneau/libdatachannel) (MPL-2.0) with libjuice (MPL-2.0), usrsctp (BSD-3) and libsrtp (BSD-3): WebRTC for PS-WRAP Link. Qt WebSockets (LGPL-3.0) for its signaling. [QR Code generator](https://github.com/nayuki/QR-Code-generator) by Project Nayuki (MIT): the invite QR code.
+- [Twemoji](https://github.com/jdecked/twemoji) (CC-BY 4.0, © Twitter, Inc and other contributors): the ❤️ 🌸 🤘 🙏 reaction images.
+- [Input Prompts](https://kenney.nl/assets/input-prompts) by Kenney (CC0): PS4/PS5 controller art.
+- Samurai armor image `samurai_photo.png`: Wikimedia Commons *MAP Expo Sujibachi kabuto Menpo 06 01 2012.jpg* (CC0), background removed and eye holes cut.
+
+Effect images cut from a game (`fx/jin_*.png`) are for private use only. They are not in this repository or the release packages and must not be distributed.
+
+## License
+
+**AGPL-3.0** (with the OpenSSL exception), the same as chiaki-ng. See [LICENSE](LICENSE) and `ps-wrap/LICENSES/`.
+If you give a PS-WRAP binary to anyone, you must also give them the source code of that version. Release packages include `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt` and a `licenses/` folder.
+PlayStation, PS4 and PS5 are trademarks of Sony Interactive Entertainment. This project is not affiliated with Sony.

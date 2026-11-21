@@ -3,6 +3,11 @@
 #ifndef CHIAKI_SETTINGS_H
 #define CHIAKI_SETTINGS_H
 
+#ifdef PSWRAP_FG_BUILD
+#define PSWRAP_FG_DEFAULT(fg, official) (fg)
+#else
+#define PSWRAP_FG_DEFAULT(fg, official) (official)
+#endif
 #include <chiaki/session.h>
 
 #include "host.h"
@@ -251,7 +256,7 @@ class Settings : public QObject
 		bool GetHideToTray() const { return settings.value("settings/pswrap_hide_to_tray", false).toBool(); }
 		void SetHideToTray(bool v) { settings.setValue("settings/pswrap_hide_to_tray", v); }
 		// PS-WRAP: overlay toggles (key เดียวกับที่ QML Settings{category:"pswrap"} เคยเขียน — ค่าเก่าใช้ต่อได้)
-		bool GetPadOverlay() const { return settings.value("pswrap/controllerOverlay", true).toBool(); }
+		bool GetPadOverlay() const { return settings.value("pswrap/controllerOverlay", PSWRAP_FG_DEFAULT(false, true)).toBool(); }
 		void SetPadOverlay(bool v) { settings.setValue("pswrap/controllerOverlay", v); }
 		bool GetCamOverlay() const { return settings.value("pswrap/webcam", false).toBool(); }
 		void SetCamOverlay(bool v) { settings.setValue("pswrap/webcam", v); }
@@ -272,8 +277,15 @@ class Settings : public QObject
 		// PS-WRAP: ภาพสวยขึ้นตอนสตรีม (qmlmainwindow_pswrapvisual.cpp) — ค่าเริ่มต้นปิดทั้งหมด
 		bool GetAmbientLight() const { return settings.value("pswrap/ambientLight", false).toBool(); }   // ขอบว่างรอบภาพ = แสงเบลอจากขอบเกม
 		void SetAmbientLight(bool v) { settings.setValue("pswrap/ambientLight", v); }
-		bool GetFrameGen() const { return settings.value("pswrap/frameGen", false).toBool(); }           // เฟรมกลางระหว่างเฟรมจริง (60 → 120)
+		bool GetFrameGen() const { return settings.value("pswrap/frameGen", PSWRAP_FG_DEFAULT(true, false)).toBool(); }           // เฟรมกลางระหว่างเฟรมจริง (60 → 120)
 		void SetFrameGen(bool v) { settings.setValue("pswrap/frameGen", v); }
+		// PS-WRAP-MAC: Frame Gen engine — 0 = auto (Apple VideoToolbox interpolation when available, else shader) · 1 = Apple · 2 = shader
+		int GetFrameGenEngine() const { return settings.value("pswrap/frameGenEngine", 0).toInt(); }
+		void SetFrameGenEngine(int v) { settings.setValue("pswrap/frameGenEngine", v); }
+		// PS-WRAP-MAC-FG: frame pairs beyond Apple VT's range (fast camera snaps): 0 = Clean (show the real frame twice — no
+		// ghosting, brief 30 fps step) · 1 = Smooth (RIFE fills them — can ghost limbs). Default Clean.
+		int GetFrameGenSnaps() const { return settings.value("pswrap/frameGenSnaps", 0).toInt(); }
+		void SetFrameGenSnaps(int v) { settings.setValue("pswrap/frameGenSnaps", v); }
 		bool GetLightbarHalo() const { return settings.value("pswrap/lightbarHalo", false).toBool(); }   // แสงเรืองขอบจอตามสีไฟจอย
 		void SetLightbarHalo(bool v) { settings.setValue("pswrap/lightbarHalo", v); }
 		// PS-WRAP: Discord Rich Presence (qmlmainwindow_pswrapdiscord.cpp) — เปิดเป็นค่าเริ่มต้นเหมือนเกมทั่วไป (ไม่เปิด Discord = ไม่มีผล)
@@ -384,7 +396,7 @@ class Settings : public QObject
 		bool GetFullscreenDoubleClickEnabled() const	   { return settings.value("settings/fullscreen_doubleclick", false).toBool(); }
 		void SetFullscreenDoubleClickEnabled(bool enabled) { settings.setValue("settings/fullscreen_doubleclick", enabled); }
 
-		bool GetIDROnFECFailureEnabled() const	   { return settings.value("settings/idr_on_fec_failure", false).toBool(); }
+		bool GetIDROnFECFailureEnabled() const	   { return settings.value("settings/idr_on_fec_failure", PSWRAP_FG_DEFAULT(true, false)).toBool(); }
 		void SetIDROnFECFailureEnabled(bool enabled) { settings.setValue("settings/idr_on_fec_failure", enabled); }
 
 		float GetHapticOverride() const 			{ return settings.value("settings/haptic_override", 1.0).toFloat(); }

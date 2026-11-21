@@ -6,6 +6,10 @@
 #include <QLoggingCategory>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <map>
+#include <string>
 
 Q_DECLARE_LOGGING_CATEGORY(chiakiGui)
 
@@ -41,17 +45,22 @@ pl_shader_var floatVar(const char *name, const float *v)
 }
 
 // ---- shaders ---- (fg_pos = ตำแหน่งพิกเซลของ target ที่จุดกึ่งกลาง เช่น (0.5, 0.5))
+// vectors are stored in screen (target) pixels: v = displacement prev → cur
 
-// เฟรมสี → luma 1/4: เฉลี่ย 4x4 ด้วย bilinear 4 จุด
+// เฟรมสี → luma level 0 (factor fac ≥ 4 so level 0 stays ~480 px wide at any screen size): box filter with
+// ntap x ntap bilinear taps (each averages 2x2) — also smooths H.265 blocking before matching
 const char *kLuma4Body = R"(
-	vec2 uv = fg_pos / out_size;
 	vec2 px = 1.0 / src_size;
 	vec3 w = vec3(0.2126, 0.7152, 0.0722);
-	float l = dot(texture(tex_src, uv + px * vec2(-1.0, -1.0)).rgb, w)
-	        + dot(texture(tex_src, uv + px * vec2( 1.0, -1.0)).rgb, w)
-	        + dot(texture(tex_src, uv + px * vec2(-1.0,  1.0)).rgb, w)
-	        + dot(texture(tex_src, uv + px * vec2( 1.0,  1.0)).rgb, w);
-	color = vec4(0.25 * l, 0.0, 0.0, 1.0);
+	vec2 c = fg_pos * fac;
+	int n = int(ntap);
+	float l = 0.0;
+	for (int y = 0; y < n; y++)
+	for (int x = 0; x < n; x++) {
+		vec2 o = 2.0 * (vec2(float(x), float(y)) - 0.5 * float(n - 1));
+		l += dot(texture(tex_src, (c + o) * px).rgb, w);
+	}
+	color = vec4(l / float(n * n), 0.0, 0.0, 1.0);
 )";
 
 // luma ย่อครึ่ง: bilinear ที่กลาง 2x2
@@ -59,68 +68,82 @@ const char *kHalfBody = R"(
 	color = vec4(texture(tex_src, fg_pos / out_size).r, 0.0, 0.0, 1.0);
 )";
 
-// motion หยาบที่ 1/16: ค้นทุกจุดในรัศมี 6 texel (≈ ±96 พิกเซลจอ) · patch 3x3 · v = การเคลื่อนที่ทั้งเฟรม
+// 1/32: full search ±8 texels · 3x3 patch · tex_a = this frame's grid, tex_b = the other frame; sgn flips backward → prev→cur
 const char *kCoarseHeader = R"(
-float fg_cost(vec2 p, vec2 v) {
+float fg_cost(vec2 q, vec2 d) {
 	float c = 0.0;
 	for (int y = -1; y <= 1; y++)
 	for (int x = -1; x <= 1; x++) {
-		vec2 q = p + vec2(float(x), float(y));
-		c += abs(texture(tex_a, (q - 0.5 * v) / lsize).r - texture(tex_b, (q + 0.5 * v) / lsize).r);
+		vec2 o = vec2(float(x), float(y));
+		c += abs(texture(tex_a, (q + o) / lsize).r - texture(tex_b, (q + o + d) / lsize).r);
 	}
 	return c;
 }
 )";
 const char *kCoarseBody = R"(
-	vec2 p = fg_pos;
-	float best = fg_cost(p, vec2(0.0)) - 0.002;
-	vec2 bv = vec2(0.0);
-	for (int y = -6; y <= 6; y++)
-	for (int x = -6; x <= 6; x++) {
-		vec2 v = vec2(float(x), float(y));
-		float c = fg_cost(p, v) + 0.0015 * length(v);
-		if (c < best) { best = c; bv = v; }
+	vec2 q = fg_pos;
+	float best = fg_cost(q, vec2(0.0)) - 0.004;
+	vec2 bd = vec2(0.0);
+	for (int y = -8; y <= 8; y++)
+	for (int x = -8; x <= 8; x++) {
+		vec2 d = vec2(float(x), float(y));
+		float c = fg_cost(q, d) + 0.002 * length(d);
+		if (c < best) { best = c; bd = d; }
 	}
-	color = vec4(bv * scale, best, 1.0);
+	vec2 base = bd;
+	for (int y = -1; y <= 1; y++)
+	for (int x = -1; x <= 1; x++) {
+		vec2 d = base + vec2(float(x), float(y));
+		float c = fg_cost(q, d) + 0.002 * length(d);
+		if (c < best) { best = c; bd = d; }
+	}
+	color = vec4(sgn * bd * scale, best, 1.0);
 )";
 
-// refine ที่ 1/8: ผู้สมัครจาก vector หยาบ 3x3 ข้างเคียง แล้วขยับ ±1 / ±0.5 · patch 5x5
+// refine (1/16, 1/8, 1/4): candidates = coarser vectors of the 3x3 neighbourhood, then ±1 / ±0.5 texel steps · 5x5 patch
+// + smoothness toward the coarser (median-filtered) prediction
 const char *kRefineHeader = R"(
-float fg_cost(vec2 p, vec2 v) {
+float fg_cost(vec2 q, vec2 d) {
 	float c = 0.0;
-	for (int y = -2; y <= 2; y++)
-	for (int x = -2; x <= 2; x++) {
-		vec2 q = p + vec2(float(x), float(y));
-		c += abs(texture(tex_a, (q - 0.5 * v) / lsize).r - texture(tex_b, (q + 0.5 * v) / lsize).r);
+	int r = int(prad);
+	for (int y = -r; y <= r; y++)
+	for (int x = -r; x <= r; x++) {
+		vec2 o = vec2(float(x), float(y));
+		c += abs(texture(tex_a, (q + o) / lsize).r - texture(tex_b, (q + o + d) / lsize).r);
 	}
 	return c;
 }
 )";
 const char *kRefineBody = R"(
-	vec2 p = fg_pos;
-	vec2 muv = p / lsize;
+	vec2 q = fg_pos;
+	vec2 cuv = q / lsize;
 	vec2 mpx = 1.0 / mvsize;
-	float best = fg_cost(p, vec2(0.0)) - 0.004;
-	vec2 bv = vec2(0.0);
+	vec2 pred = sgn * texture(tex_mv, cuv).xy / scale;
+	float best = 1e9;
+	vec2 bd = vec2(0.0);
 	for (int y = -1; y <= 1; y++)
 	for (int x = -1; x <= 1; x++) {
-		vec2 v = texture(tex_mv, muv + mpx * vec2(float(x), float(y))).xy / scale;
-		float c = fg_cost(p, v) + 0.003 * length(v);
-		if (c < best) { best = c; bv = v; }
+		vec2 d = sgn * texture(tex_mv, cuv + mpx * vec2(float(x), float(y))).xy / scale;
+		float c = fg_cost(q, d) + lam * length(d - pred);
+		if (c < best) { best = c; bd = d; }
+	}
+	{
+		float c = fg_cost(q, vec2(0.0)) + lam * length(pred) - 0.004;
+		if (c < best) { best = c; bd = vec2(0.0); }
 	}
 	for (int s = 0; s < 2; s++) {
 		float st = s == 0 ? 1.0 : 0.5;
-		vec2 base = bv;
+		vec2 base = bd;
 		for (int y = -1; y <= 1; y++)
 		for (int x = -1; x <= 1; x++) {
 			if (x == 0 && y == 0)
 				continue;
-			vec2 v = base + st * vec2(float(x), float(y));
-			float c = fg_cost(p, v) + 0.003 * length(v);
-			if (c < best) { best = c; bv = v; }
+			vec2 d = base + st * vec2(float(x), float(y));
+			float c = fg_cost(q, d) + lam * length(d - pred);
+			if (c < best) { best = c; bd = d; }
 		}
 	}
-	color = vec4(bv * scale, best, 1.0);
+	color = vec4(sgn * bd * scale, best, 1.0);
 )";
 
 // median ของ vector 3x3 (ตัวที่ห่างตัวอื่นรวมน้อยสุด) — ตัด vector หลุดเดี่ยวๆ
@@ -140,46 +163,144 @@ const char *kMedianBody = R"(
 			d += length(c[i] - c[j]);
 		if (d < bestd) { bestd = d; bv = c[i]; }
 	}
-	color = vec4(bv, 0.0, 1.0);
+	color = vec4(bv, texture(tex_mv, uv).z, 1.0);
 )";
 
-// เฟรมกลาง: ผู้สมัคร = vector bilinear / texel ใกล้สุด / ศูนย์ (HUD นิ่ง) · ต่างน้อยสุดชนะ (5 จุด รูปกากบาท)
-const char *kInterpHeader = R"(
-vec3 fg_a;
-vec3 fg_b;
-float fg_err(vec2 uv, vec2 v, vec2 px) {
-	vec2 oa = -t_mix * v * px;
-	vec2 ob = (1.0 - t_mix) * v * px;
-	vec3 a = texture(tex_a, uv + oa).rgb;
-	vec3 b = texture(tex_b, uv + ob).rgb;
-	vec3 one = vec3(1.0);
-	float e = dot(abs(a - b), one);
-	vec2 dx = vec2(2.0 * px.x, 0.0);
-	vec2 dy = vec2(0.0, 2.0 * px.y);
-	e += dot(abs(texture(tex_a, uv + oa + dx).rgb - texture(tex_b, uv + ob + dx).rgb), one);
-	e += dot(abs(texture(tex_a, uv + oa - dx).rgb - texture(tex_b, uv + ob - dx).rgb), one);
-	e += dot(abs(texture(tex_a, uv + oa + dy).rgb - texture(tex_b, uv + ob + dy).rgb), one);
-	e += dot(abs(texture(tex_a, uv + oa - dy).rgb - texture(tex_b, uv + ob - dy).rgb), one);
-	fg_a = a;
-	fg_b = b;
-	return e;
+// scene cut: motion-compensated error stays high everywhere (a pan / occlusion doesn't) — average of the coarse forward
+// matching cost on a 16x9 grid, plus the raw luma difference (1x1 output, one invocation, ~300 fetches)
+const char *kCutBody = R"(
+	float cost = 0.0;
+	float mad = 0.0;
+	for (int y = 0; y < 9; y++)
+	for (int x = 0; x < 16; x++) {
+		vec2 uv = (vec2(float(x), float(y)) + 0.5) / vec2(16.0, 9.0);
+		cost += texture(tex_mv, uv).z / 9.0;
+		mad += abs(texture(tex_a, uv).r - texture(tex_b, uv).r);
+	}
+	cost /= 144.0;
+	mad /= 144.0;
+	float cut = (cost > 0.075 && mad > 0.08) ? 1.0 : 0.0;
+	color = vec4(cut, cost, mad, 1.0);
+)";
+
+// decision at 1/4: pick a vector + which frame(s) to sample, using forward/backward consistency for occlusion
+const char *kDecideHeader = R"(
+vec2 fg_ff(vec2 x) { return texture(tex_mf, x / s4 / lsize).xy; }
+vec2 fg_fb(vec2 x) { return texture(tex_mb, x / s4 / lsize).xy; }
+float fg_err(vec2 qa, vec2 qb) {
+	float e = 0.0;
+	for (int y = -1; y <= 1; y++)
+	for (int x = -1; x <= 1; x++) {
+		vec2 o = vec2(float(x), float(y));
+		e += abs(texture(tex_la, (qa / s4 + o) / lsize).r - texture(tex_lb, (qb / s4 + o) / lsize).r);
+	}
+	return e / 9.0;
+}
+vec4 fg_best;
+void fg_consider(vec2 pd, vec2 v, float bias) {
+	vec2 qa = pd - t_mix * v;
+	vec2 qb = pd + (1.0 - t_mix) * v;
+	float tau = 1.5 * max(s4.x, s4.y) + 0.12 * length(v);
+	bool oka = length(fg_ff(qa) - v) < tau;
+	bool okb = length(fg_fb(qb) - v) < tau;
+	float e = fg_err(qa, qb);
+	float cost;
+	float wa;
+	if (oka && okb) { cost = e; wa = 0.5; }
+	else if (oka) { cost = c_occ + 0.25 * e; wa = 1.0; }
+	else if (okb) { cost = c_occ + 0.25 * e; wa = 0.0; }
+	else { cost = c_bad + e; wa = 0.5; }
+	cost += bias;
+	if (cost < fg_best.w)
+		fg_best = vec4(v, wa, cost);
 }
 )";
-const char *kInterpBody = R"(
+const char *kDecideBody = R"(
+	vec2 pd = fg_pos * s4;   // screen px
+	fg_best = vec4(0.0, 0.0, 0.5, 1e9);
+	fg_consider(pd, vec2(0.0), -0.003);   // static HUD / still areas
+	vec2 v = fg_ff(pd);
+	v = fg_ff(pd - t_mix * v);
+	v = fg_ff(pd - t_mix * v);
+	fg_consider(pd, v, 0.0);
+	v = fg_fb(pd);
+	v = fg_fb(pd + (1.0 - t_mix) * v);
+	v = fg_fb(pd + (1.0 - t_mix) * v);
+	fg_consider(pd, v, 0.0);
+	for (int r = 0; r < 2; r++) {
+		vec2 o = s4 * (r == 0 ? 4.0 : 12.0);
+		fg_consider(pd, fg_ff(pd + vec2(o.x, 0.0)), 0.002);
+		fg_consider(pd, fg_ff(pd - vec2(o.x, 0.0)), 0.002);
+		fg_consider(pd, fg_ff(pd + vec2(0.0, o.y)), 0.002);
+		fg_consider(pd, fg_ff(pd - vec2(0.0, o.y)), 0.002);
+		fg_consider(pd, fg_fb(pd + vec2(o.x, 0.0)), 0.002);
+		fg_consider(pd, fg_fb(pd - vec2(o.x, 0.0)), 0.002);
+		fg_consider(pd, fg_fb(pd + vec2(0.0, o.y)), 0.002);
+		fg_consider(pd, fg_fb(pd - vec2(0.0, o.y)), 0.002);
+	}
+	color = fg_best;
+)";
+
+// full-res synthesis: per pixel, choose among the 4 nearest decisions (pixel-accurate edges) and sample
+const char *kSynthHeader = R"(
+vec3 fg_col;
+float fg_eval(vec2 uv, vec2 px, vec4 dec) {
+	vec2 oa = -t_mix * dec.xy * px;
+	vec2 ob = (1.0 - t_mix) * dec.xy * px;
+	vec3 a = texture(tex_a, uv + oa).rgb;
+	vec3 b = texture(tex_b, uv + ob).rgb;
+	float wa = dec.z;
+	float cost = dec.w;
+	if (wa > 0.25 && wa < 0.75) {
+		vec3 lw = vec3(0.2126, 0.7152, 0.0722);
+		vec2 dx = vec2(2.0 * px.x, 0.0);
+		vec2 dy = vec2(0.0, 2.0 * px.y);
+		float e = abs(dot(a - b, lw));
+		e += abs(dot(texture(tex_a, uv + oa + dx).rgb - texture(tex_b, uv + ob + dx).rgb, lw));
+		e += abs(dot(texture(tex_a, uv + oa - dx).rgb - texture(tex_b, uv + ob - dx).rgb, lw));
+		e += abs(dot(texture(tex_a, uv + oa + dy).rgb - texture(tex_b, uv + ob + dy).rgb, lw));
+		e += abs(dot(texture(tex_a, uv + oa - dy).rgb - texture(tex_b, uv + ob - dy).rgb, lw));
+		cost = 0.5 * cost + 0.5 * (e / 5.0);
+		wa = 1.0 - t_mix;
+	}
+	fg_col = mix(b, a, wa);
+	return cost;
+}
+void fg_quick(vec2 uv, vec2 px, vec4 dec) {
+	vec3 a = texture(tex_a, uv - t_mix * dec.xy * px).rgb;
+	vec3 b = texture(tex_b, uv + (1.0 - t_mix) * dec.xy * px).rgb;
+	float wa = (dec.z > 0.25 && dec.z < 0.75) ? 1.0 - t_mix : dec.z;
+	fg_col = mix(b, a, wa);
+}
+)";
+const char *kSynthBody = R"(
 	vec2 px = 1.0 / full_size;
 	vec2 uv = fg_pos * px;
-	float e = fg_err(uv, texture(tex_mv, uv).xy, px) * 0.9;
-	vec3 a = fg_a;
-	vec3 b = fg_b;
-	// texel ใกล้สุด = sample linear ตรงกลาง texel (libplacebo ห้าม bind texture เดียวกันสองช่อง)
-	vec2 nuv = (floor(uv * mvsize) + 0.5) / mvsize;
-	float e1 = fg_err(uv, texture(tex_mv, nuv).xy, px);
-	if (e1 < e) { e = e1; a = fg_a; b = fg_b; }
-	float e2 = fg_err(uv, vec2(0.0), px);
-	if (e2 < e) { e = e2; a = fg_a; b = fg_b; }
-	vec3 blend = mix(a, b, t_mix);
-	vec3 side = t_mix <= 0.5 ? a : b;
-	color = vec4(mix(blend, side, smoothstep(0.6, 1.8, e)), 1.0);
+	if (texture(tex_cut, vec2(0.5)).x > 0.5) {
+		color = vec4(texture(tex_a, uv).rgb, 1.0);   // scene cut: hold the previous frame
+	} else {
+		vec2 dp = uv * dsize - 0.5;
+		vec2 base = floor(dp);
+		vec2 f = dp - base;
+		float bestc = 1e9;
+		vec3 bestcol = vec3(0.0);
+		vec4 d0 = texture(tex_d, (base + 0.5) / dsize);
+		vec4 d1 = texture(tex_d, (base + vec2(1.0, 0.0) + 0.5) / dsize);
+		vec4 d2 = texture(tex_d, (base + vec2(0.0, 1.0) + 0.5) / dsize);
+		vec4 d3 = texture(tex_d, (base + vec2(1.0, 1.0) + 0.5) / dsize);
+		vec3 dd = abs(d1.xyz - d0.xyz) + abs(d2.xyz - d0.xyz) + abs(d3.xyz - d0.xyz);
+		bool same = max(max(dd.x, dd.y), dd.z) < 0.3;
+		for (int k = 0; k < (same ? 1 : 4); k++) {
+			vec2 o = vec2(float(k & 1), float(k >> 1));
+			vec4 dec = k == 0 ? d0 : (k == 1 ? d1 : (k == 2 ? d2 : d3));
+			float c = same ? 0.0 : fg_eval(uv, px, dec);
+			if (same) { fg_quick(uv, px, dec); }
+			// slight preference for the closest decision texel
+			c += 0.004 * length(o - f);
+			if (c < bestc) { bestc = c; bestcol = fg_col; }
+		}
+		color = vec4(bestcol, 1.0);
+	}
 )";
 
 } // namespace
@@ -188,9 +309,12 @@ PsWrapFrameGen::PsWrapFrameGen(pl_gpu gpu, pl_log log)
 	: gpu(gpu), log(log)
 {
 	dp = pl_dispatch_create(log, gpu);
-	fmt_rgba = pl_find_fmt(gpu, PL_FMT_UNORM, 4, 16, 0, kTexCaps);
+	// BLITTABLE: pl_render_image clears the part of the target outside the video crop (letterbox) with pl_tex_clear,
+	// which needs blit_dst — without it the clear fails ("Validation failed: dst->params.blit_dst") and the bars show garbage/magenta
+	constexpr auto kFrameCaps = static_cast<pl_fmt_caps>(kTexCaps | PL_FMT_CAP_BLITTABLE);
+	fmt_rgba = pl_find_fmt(gpu, PL_FMT_UNORM, 4, 16, 0, kFrameCaps);
 	if (!fmt_rgba)
-		fmt_rgba = pl_find_fmt(gpu, PL_FMT_UNORM, 4, 8, 0, kTexCaps);
+		fmt_rgba = pl_find_fmt(gpu, PL_FMT_UNORM, 4, 8, 0, kFrameCaps);
 	fmt_luma = pl_find_fmt(gpu, PL_FMT_FLOAT, 1, 16, 0, kTexCaps);
 	if (!fmt_luma)
 		fmt_luma = pl_find_fmt(gpu, PL_FMT_UNORM, 1, 16, 0, kTexCaps);
@@ -211,8 +335,20 @@ PsWrapFrameGen::~PsWrapFrameGen()
 
 void PsWrapFrameGen::destroyTextures()
 {
-	pl_tex *all[] = {&frame[0], &frame[1], &luma4[0], &luma4[1], &luma8[0], &luma8[1], &luma16[0], &luma16[1],
-	                 &mv16, &mv8, &mv8s, &mid};
+	for (int i = 0; i < 2; i++) {
+		if (frame[i])
+			pl_tex_destroy(gpu, &frame[i]);
+		for (int l = 0; l < kLevels; l++)
+			if (luma[i][l])
+				pl_tex_destroy(gpu, &luma[i][l]);
+	}
+	for (int l = 0; l < kLevels; l++) {
+		if (mvf[l])
+			pl_tex_destroy(gpu, &mvf[l]);
+		if (mvb[l])
+			pl_tex_destroy(gpu, &mvb[l]);
+	}
+	pl_tex *all[] = {&mvtmp, &decision, &cutinfo, &mid};
 	for (pl_tex *t : all)
 		if (*t)
 			pl_tex_destroy(gpu, t);
@@ -234,8 +370,14 @@ pl_tex PsWrapFrameGen::makeTex(int w, int h, pl_fmt fmt)
 	p.format = fmt;
 	p.renderable = true;
 	p.sampleable = true;
+	p.blit_dst = (fmt->caps & PL_FMT_CAP_BLITTABLE) != 0;   // needed for pl_tex_clear (letterbox clear in pl_render_image)
 	p.debug_tag = PL_DEBUG_TAG;
-	return pl_tex_create(gpu, &p);
+	pl_tex t = pl_tex_create(gpu, &p);
+	if (t && p.blit_dst) {
+		const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+		pl_tex_clear(gpu, t, black);   // never show uninitialised memory
+	}
+	return t;
 }
 
 bool PsWrapFrameGen::ensure(int w, int h)
@@ -245,19 +387,28 @@ bool PsWrapFrameGen::ensure(int w, int h)
 	if (w == width && h == height && frame[0])
 		return true;
 	destroyTextures();
-	const int w4 = (w + 3) / 4, h4 = (h + 3) / 4;
-	const int w8 = (w4 + 1) / 2, h8 = (h4 + 1) / 2;
-	const int w16 = (w8 + 1) / 2, h16 = (h8 + 1) / 2;
+	int lw[kLevels], lh[kLevels];
+	// level 0 ≈ 480 px wide whatever the screen (1080p screen: 1/4 · 3456 px Retina: 1/7) → cost independent of display size
+	l0_factor = std::max(4, int(std::lround(w / 480.0)));
+	lw[0] = (w + l0_factor - 1) / l0_factor;
+	lh[0] = (h + l0_factor - 1) / l0_factor;
+	for (int l = 1; l < kLevels; l++) {
+		lw[l] = (lw[l - 1] + 1) / 2;
+		lh[l] = (lh[l - 1] + 1) / 2;
+	}
 	bool ok = true;
 	for (int i = 0; i < 2; i++) {
 		ok = ok && (frame[i] = makeTex(w, h, fmt_rgba));
-		ok = ok && (luma4[i] = makeTex(w4, h4, fmt_luma));
-		ok = ok && (luma8[i] = makeTex(w8, h8, fmt_luma));
-		ok = ok && (luma16[i] = makeTex(w16, h16, fmt_luma));
+		for (int l = 0; l < kLevels; l++)
+			ok = ok && (luma[i][l] = makeTex(lw[l], lh[l], fmt_luma));
 	}
-	ok = ok && (mv16 = makeTex(w16, h16, fmt_mv));
-	ok = ok && (mv8 = makeTex(w8, h8, fmt_mv));
-	ok = ok && (mv8s = makeTex(w8, h8, fmt_mv));
+	for (int l = 0; l < kLevels; l++) {
+		ok = ok && (mvf[l] = makeTex(lw[l], lh[l], fmt_mv));
+		ok = ok && (mvb[l] = makeTex(lw[l], lh[l], fmt_mv));
+	}
+	ok = ok && (mvtmp = makeTex(lw[0], lh[0], fmt_mv));
+	ok = ok && (decision = makeTex(lw[0], lh[0], fmt_mv));
+	ok = ok && (cutinfo = makeTex(1, 1, fmt_mv));
 	ok = ok && (mid = makeTex(w, h, fmt_rgba));
 	if (!ok) {
 		qCWarning(chiakiGui) << "PSWRAP framegen: texture allocation failed at" << w << "x" << h;
@@ -306,9 +457,29 @@ bool PsWrapFrameGen::run(pl_tex target, const char *name, const char *header, co
 	pl_dispatch_params dpp = {};
 	dpp.shader = &sh;
 	dpp.target = target;
+	// PSWRAP_FG_PROFILE=1: per-pass GPU time via pl_timer (offline harness / debugging only)
+	static const bool profile = qEnvironmentVariableIntValue("PSWRAP_FG_PROFILE") != 0;
+	static std::map<std::string, std::pair<pl_timer, std::pair<double, int>>> acc;
+	std::string key = std::string(name) + " " + std::to_string(target->params.w) + "x" + std::to_string(target->params.h);
+	if (profile) {
+		auto &a = acc[key];
+		if (!a.first)
+			a.first = pl_timer_create(gpu);
+		dpp.timer = a.first;
+	}
 	if (!pl_dispatch_finish(dp, &dpp)) {
 		qCWarning(chiakiGui) << "PSWRAP framegen: dispatch failed:" << name;
 		return false;
+	}
+	if (profile) {
+		pl_gpu_finish(gpu);
+		auto &a = acc[key];
+		uint64_t ns;
+		while ((ns = pl_timer_query(gpu, a.first)) != 0) {
+			a.second.first += ns / 1e6;
+			if (++a.second.second % 100 == 0)
+				fprintf(stderr, "PSWRAP fg profile %-40s %.3f ms\n", key.c_str(), a.second.first / a.second.second);
+		}
 	}
 	return true;
 }
@@ -316,19 +487,18 @@ bool PsWrapFrameGen::run(pl_tex target, const char *name, const char *header, co
 bool PsWrapFrameGen::lumaPyramid(int idx)
 {
 	{
-		const float out_size[2] = {float(luma4[idx]->params.w), float(luma4[idx]->params.h)};
 		const float src_size[2] = {float(width), float(height)};
+		const float fac = float(l0_factor), ntap = float((l0_factor + 1) / 2);
 		const pl_shader_desc d[] = {sampled("tex_src", frame[idx], true)};
-		const pl_shader_var v[] = {vec2Var("out_size", out_size), vec2Var("src_size", src_size)};
-		if (!run(luma4[idx], "pswrap fg luma4", nullptr, kLuma4Body, d, 1, v, 2))
+		const pl_shader_var v[] = {vec2Var("src_size", src_size), floatVar("fac", &fac), floatVar("ntap", &ntap)};
+		if (!run(luma[idx][0], "pswrap fg luma0", nullptr, kLuma4Body, d, 1, v, 3))
 			return false;
 	}
-	const pl_tex chain[3] = {luma4[idx], luma8[idx], luma16[idx]};
-	for (int i = 1; i < 3; i++) {
-		const float out_size[2] = {float(chain[i]->params.w), float(chain[i]->params.h)};
-		const pl_shader_desc d[] = {sampled("tex_src", chain[i - 1], true)};
+	for (int l = 1; l < kLevels; l++) {
+		const float out_size[2] = {float(luma[idx][l]->params.w), float(luma[idx][l]->params.h)};
+		const pl_shader_desc d[] = {sampled("tex_src", luma[idx][l - 1], true)};
 		const pl_shader_var v[] = {vec2Var("out_size", out_size)};
-		if (!run(chain[i], "pswrap fg luma half", nullptr, kHalfBody, d, 1, v, 1))
+		if (!run(luma[idx][l], "pswrap fg luma half", nullptr, kHalfBody, d, 1, v, 1))
 			return false;
 	}
 	return true;
@@ -376,54 +546,89 @@ bool PsWrapFrameGen::hasPair() const
 	return !failed && valid[0] && valid[1];
 }
 
+bool PsWrapFrameGen::motion()
+{
+	const int prev = 1 - cur;
+	const int top = kLevels - 1;
+	for (int dir = 0; dir < 2; dir++) {
+		// forward: grid = prev, search in cur · backward: grid = cur, search in prev (stored as prev → cur)
+		const int ga = dir == 0 ? prev : cur, gb = dir == 0 ? cur : prev;
+		pl_tex *mv = dir == 0 ? mvf : mvb;
+		const float sgn = dir == 0 ? 1.0f : -1.0f;
+		{
+			const float ls[2] = {float(luma[0][top]->params.w), float(luma[0][top]->params.h)};
+			const float sc[2] = {float(width) / ls[0], float(height) / ls[1]};
+			const pl_shader_desc d[] = {sampled("tex_a", luma[ga][top], true), sampled("tex_b", luma[gb][top], true)};
+			const pl_shader_var v[] = {vec2Var("lsize", ls), vec2Var("scale", sc), floatVar("sgn", &sgn)};
+			if (!run(mv[top], "pswrap fg motion coarse", kCoarseHeader, kCoarseBody, d, 2, v, 3))
+				return false;
+		}
+		for (int l = top - 1; l >= 0; l--) {
+			const float ls[2] = {float(luma[0][l]->params.w), float(luma[0][l]->params.h)};
+			const float sc[2] = {float(width) / ls[0], float(height) / ls[1]};
+			const float ms[2] = {float(mv[l + 1]->params.w), float(mv[l + 1]->params.h)};
+			const float lam = l == 0 ? 0.008f : 0.02f;   // cost scales with the patch (3x3 at level 0, 5x5 above)
+			const float prad = l == 0 ? 1.0f : 2.0f;
+			const pl_shader_desc d[] = {sampled("tex_a", luma[ga][l], true), sampled("tex_b", luma[gb][l], true),
+			                            sampled("tex_mv", mv[l + 1], false)};
+			const pl_shader_var v[] = {vec2Var("lsize", ls), vec2Var("scale", sc), vec2Var("mvsize", ms),
+			                           floatVar("sgn", &sgn), floatVar("lam", &lam), floatVar("prad", &prad)};
+			if (!run(mv[l], "pswrap fg motion refine", kRefineHeader, kRefineBody, d, 3, v, 6))
+				return false;
+			if (l == 0) {   // 3x3 vector median at 1/4 (outliers on repetitive texture / compression noise)
+				const pl_shader_desc dm[] = {sampled("tex_mv", mv[0], false)};
+				const pl_shader_var vm[] = {vec2Var("mvsize", ls)};
+				if (!run(mvtmp, "pswrap fg motion median", nullptr, kMedianBody, dm, 1, vm, 1))
+					return false;
+				std::swap(mv[0], mvtmp);
+			}
+		}
+	}
+	{
+		const float ls[2] = {float(luma[0][top]->params.w), float(luma[0][top]->params.h)};
+		const pl_shader_desc d[] = {sampled("tex_a", luma[prev][top], true), sampled("tex_b", luma[cur][top], true),
+		                            sampled("tex_mv", mvf[top], false)};
+		if (!run(cutinfo, "pswrap fg cut", nullptr, kCutBody, d, 3, nullptr, 0))
+			return false;
+	}
+	return true;
+}
+
 bool PsWrapFrameGen::interpolate(float t)
 {
 	if (!hasPair())
 		return false;
 	const int prev = 1 - cur;
 	if (!motion_ready) {
-		const float l16[2] = {float(luma16[0]->params.w), float(luma16[0]->params.h)};
-		const float l8[2] = {float(luma8[0]->params.w), float(luma8[0]->params.h)};
-		const float s16[2] = {float(width) / l16[0], float(height) / l16[1]};
-		const float s8[2] = {float(width) / l8[0], float(height) / l8[1]};
-		{
-			const pl_shader_desc d[] = {sampled("tex_a", luma16[prev], true), sampled("tex_b", luma16[cur], true)};
-			const pl_shader_var v[] = {vec2Var("lsize", l16), vec2Var("scale", s16)};
-			if (!run(mv16, "pswrap fg motion coarse", kCoarseHeader, kCoarseBody, d, 2, v, 2)) {
-				failed = true;
-				return false;
-			}
-		}
-		{
-			const pl_shader_desc d[] = {sampled("tex_a", luma8[prev], true), sampled("tex_b", luma8[cur], true),
-			                            sampled("tex_mv", mv16, false)};
-			const pl_shader_var v[] = {vec2Var("lsize", l8), vec2Var("scale", s8), vec2Var("mvsize", l16)};
-			if (!run(mv8, "pswrap fg motion refine", kRefineHeader, kRefineBody, d, 3, v, 3)) {
-				failed = true;
-				return false;
-			}
-		}
-		{
-			const pl_shader_desc d[] = {sampled("tex_mv", mv8, false)};
-			const pl_shader_var v[] = {vec2Var("mvsize", l8)};
-			if (!run(mv8s, "pswrap fg motion median", nullptr, kMedianBody, d, 1, v, 1)) {
-				failed = true;
-				return false;
-			}
+		if (!motion()) {
+			failed = true;
+			return false;
 		}
 		motion_ready = true;
 	}
-	const float full[2] = {float(width), float(height)};
 	const float tm = std::clamp(t, 0.0f, 1.0f);
-	const float mvs[2] = {float(mv8s->params.w), float(mv8s->params.h)};
+	{
+		const float ls[2] = {float(decision->params.w), float(decision->params.h)};
+		const float s4[2] = {float(width) / ls[0], float(height) / ls[1]};
+		const float c_occ = 0.05f, c_bad = 0.12f;
+		const pl_shader_desc d[] = {sampled("tex_la", luma[prev][0], true), sampled("tex_lb", luma[cur][0], true),
+		                            sampled("tex_mf", mvf[0], false), sampled("tex_mb", mvb[0], false)};
+		const pl_shader_var v[] = {vec2Var("lsize", ls), vec2Var("s4", s4), floatVar("t_mix", &tm),
+		                           floatVar("c_occ", &c_occ), floatVar("c_bad", &c_bad)};
+		if (!run(decision, "pswrap fg decide", kDecideHeader, kDecideBody, d, 4, v, 5)) {
+			failed = true;
+			return false;
+		}
+	}
+	const float full[2] = {float(width), float(height)};
+	const float ds[2] = {float(decision->params.w), float(decision->params.h)};
 	const pl_shader_desc d[] = {sampled("tex_a", frame[prev], true), sampled("tex_b", frame[cur], true),
-	                            sampled("tex_mv", mv8s, true)};
-	const pl_shader_var v[] = {vec2Var("full_size", full), floatVar("t_mix", &tm), vec2Var("mvsize", mvs)};
-	if (!run(mid, "pswrap fg interpolate", kInterpHeader, kInterpBody, d, 3, v, 3)) {
+	                            sampled("tex_d", decision, false), sampled("tex_cut", cutinfo, false)};
+	const pl_shader_var v[] = {vec2Var("full_size", full), floatVar("t_mix", &tm), vec2Var("dsize", ds)};
+	if (!run(mid, "pswrap fg interpolate", kSynthHeader, kSynthBody, d, 4, v, 3)) {
 		failed = true;
 		return false;
 	}
-
 	return true;
 }
 

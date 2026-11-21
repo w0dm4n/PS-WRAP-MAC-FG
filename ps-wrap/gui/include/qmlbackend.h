@@ -306,6 +306,10 @@ private:
     mutable class PsWrapNetCheck *pswrap_netcheck = nullptr;
     StreamSession *session = {};
     QThread *frame_thread = {};
+    class PsWrapVtFrameGen *pswrap_vt_fg = nullptr;   // PS-WRAP-MAC: Apple VT frame gen — frame thread only
+    QAtomicInteger<int32_t> pswrap_frames_lost = 0;
+    bool pswrapPrepareFrame(struct chiaki_ffmpeg_frame_t &frame, bool use_opengl_renderer);
+    void pswrapPresentFrame(struct chiaki_ffmpeg_frame_t frame);
     QTimer *psn_reconnect_timer = {};
     QTimer *psn_auto_connect_timer = {};
     QTimer *wakeup_start_timer = {};

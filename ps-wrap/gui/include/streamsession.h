@@ -5,6 +5,8 @@
 
 #include <chiaki/session.h>
 #include <atomic>
+#include <QDateTime>
+#include <QVector>
 #include <chiaki/opusdecoder.h>
 #include <chiaki/opusencoder.h>
 #include <chiaki/ffmpegdecoder.h>
@@ -242,9 +244,28 @@ class StreamSession : public QObject
 		int pswrap_awake_dir = 1;
 		Settings *pswrap_settings = nullptr;
 		QTimer *pswrap_awake_timer = nullptr;
+	public:
+		QAtomicInteger<qint64> pswrap_last_video_ms = 0;   // PS-WRAP-MAC-FG video watchdog (decoder callback thread)
+	private:
+		qint64 pswrap_last_idr_req_ms = 0;
 		void PsWrapStayAwakeInit(Settings *settings);
 		void PsWrapNoteInput(const ChiakiControllerState &state);
 		void PsWrapStayAwakeTick();
+		// PS-WRAP-MAC-FG test autopilot (off unless PSWRAP_AUTOPILOT=<script> is set): timed scripted pad input
+	public:
+		struct PsWrapAutoStep { qint64 t_ms; uint32_t buttons; int16_t lx, ly, rx, ry; uint8_t l2, r2; QString note; };
+		QVector<PsWrapAutoStep> pswrap_auto_steps;
+		qint64 pswrap_auto_loop_ms = -1;      // "loop <t_ms>": jump back to t_ms when the script ends
+		qint64 pswrap_auto_start_ms = 0;
+		int pswrap_auto_cur = -1;
+		ChiakiControllerState autopilot_state;
+		QString pswrap_auto_path;
+		QDateTime pswrap_auto_mtime;
+		int pswrap_auto_ticks = 0;
+		QTimer *pswrap_auto_timer = nullptr;
+	private:
+		void PsWrapAutopilotInit();
+		void PsWrapAutopilotTick();
 		QMap<int, uint8_t> touch_tracker;
 		int8_t mouse_touch_id;
 		ChiakiControllerState dpad_touch_state;

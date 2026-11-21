@@ -9,6 +9,8 @@
 #include <chiaki/time.h>
 
 #include <QTimer>
+#include <QHash>
+#include <QRegularExpression>
 
 #include <cstdlib>
 
@@ -78,4 +80,151 @@ void StreamSession::PsWrapStayAwakeTick()
 		chiaki_controller_state_set_idle(&awake_state);
 		SendFeedbackState();
 	});
+}
+
+// ---------------------------------------------------------------- PS-WRAP-MAC-FG test autopilot
+// Enabled only with the env var PSWRAP_AUTOPILOT=/path/script.txt (never by settings). Script lines:
+//   <t_ms> <buttons> <lx> <ly> <rx> <ry> <l2> <r2> [# note]     state held from t_ms until the next line
+//   buttons: '-' or names joined by '|': CROSS MOON(CIRCLE) BOX(SQUARE) PYRAMID(TRIANGLE) L1 R1 L3 R3 OPTIONS SHARE TOUCHPAD PS UP DOWN LEFT RIGHT
+//   sticks -32767..32767 (ly < 0 = up), triggers 0..255 · "loop <t_ms>" at the end repeats from t_ms
+// The clock starts when the session is created; every applied line is logged with the "[autopilot]" prefix.
+#include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QLoggingCategory>
+#include <QTextStream>
+Q_DECLARE_LOGGING_CATEGORY(chiakiGui)
+
+static uint32_t pswrapAutoButtons(const QString &spec)
+{
+	if (spec == QLatin1String("-"))
+		return 0;
+	static const QHash<QString, uint32_t> names = {
+		{"CROSS", CHIAKI_CONTROLLER_BUTTON_CROSS}, {"MOON", CHIAKI_CONTROLLER_BUTTON_MOON}, {"CIRCLE", CHIAKI_CONTROLLER_BUTTON_MOON},
+		{"BOX", CHIAKI_CONTROLLER_BUTTON_BOX}, {"SQUARE", CHIAKI_CONTROLLER_BUTTON_BOX}, {"PYRAMID", CHIAKI_CONTROLLER_BUTTON_PYRAMID},
+		{"TRIANGLE", CHIAKI_CONTROLLER_BUTTON_PYRAMID}, {"L1", CHIAKI_CONTROLLER_BUTTON_L1}, {"R1", CHIAKI_CONTROLLER_BUTTON_R1},
+		{"L3", CHIAKI_CONTROLLER_BUTTON_L3}, {"R3", CHIAKI_CONTROLLER_BUTTON_R3}, {"OPTIONS", CHIAKI_CONTROLLER_BUTTON_OPTIONS},
+		{"SHARE", CHIAKI_CONTROLLER_BUTTON_SHARE}, {"TOUCHPAD", CHIAKI_CONTROLLER_BUTTON_TOUCHPAD}, {"PS", CHIAKI_CONTROLLER_BUTTON_PS},
+		{"UP", CHIAKI_CONTROLLER_BUTTON_DPAD_UP}, {"DOWN", CHIAKI_CONTROLLER_BUTTON_DPAD_DOWN},
+		{"LEFT", CHIAKI_CONTROLLER_BUTTON_DPAD_LEFT}, {"RIGHT", CHIAKI_CONTROLLER_BUTTON_DPAD_RIGHT}};
+	uint32_t b = 0;
+	for (const QString &n : spec.split('|', Qt::SkipEmptyParts))
+		b |= names.value(n.trimmed().toUpper(), 0);
+	return b;
+}
+
+static bool pswrapAutoLoad(const QString &path, QVector<StreamSession::PsWrapAutoStep> &steps, qint64 &loop_ms);
+
+void StreamSession::PsWrapAutopilotInit()
+{
+	chiaki_controller_state_set_idle(&autopilot_state);
+	const QString path = qEnvironmentVariable("PSWRAP_AUTOPILOT");
+	if (path.isEmpty())
+		return;
+	pswrap_auto_path = path;
+	pswrap_auto_mtime = QFileInfo(path).lastModified();
+	pswrapAutoLoad(path, pswrap_auto_steps, pswrap_auto_loop_ms);
+	qCInfo(chiakiGui) << "[autopilot] loaded" << pswrap_auto_steps.size() << "steps from" << path << "loop" << pswrap_auto_loop_ms;
+	pswrap_auto_start_ms = nowMs();
+	pswrap_auto_timer = new QTimer(this);
+	pswrap_auto_timer->setTimerType(Qt::PreciseTimer);
+	pswrap_auto_timer->setInterval(16);
+	connect(pswrap_auto_timer, &QTimer::timeout, this, &StreamSession::PsWrapAutopilotTick);
+	pswrap_auto_timer->start();
+}
+
+// re-read on every file change (clock restarts) → a test harness can drive the session step by step
+static bool pswrapAutoLoad(const QString &path, QVector<StreamSession::PsWrapAutoStep> &steps, qint64 &loop_ms)
+{
+	steps.clear();
+	loop_ms = -1;
+	QFile f(path);
+	if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		qCWarning(chiakiGui) << "[autopilot] can't open" << path;
+		return false;
+	}
+	QTextStream ts(&f);
+	while (!ts.atEnd()) {
+		QString line = ts.readLine();
+		QString note;
+		const int hash = line.indexOf('#');
+		if (hash >= 0) {
+			note = line.mid(hash + 1).trimmed();
+			line = line.left(hash);
+		}
+		const QStringList t = line.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+		if (t.isEmpty())
+			continue;
+		if (t[0] == QLatin1String("loop") && t.size() >= 2) {
+			loop_ms = t[1].toLongLong();
+			continue;
+		}
+		if (t.size() < 8)
+			continue;
+		StreamSession::PsWrapAutoStep st;
+		st.t_ms = t[0].toLongLong();
+		st.buttons = pswrapAutoButtons(t[1]);
+		st.lx = int16_t(qBound(-32767, t[2].toInt(), 32767));
+		st.ly = int16_t(qBound(-32767, t[3].toInt(), 32767));
+		st.rx = int16_t(qBound(-32767, t[4].toInt(), 32767));
+		st.ry = int16_t(qBound(-32767, t[5].toInt(), 32767));
+		st.l2 = uint8_t(qBound(0, t[6].toInt(), 255));
+		st.r2 = uint8_t(qBound(0, t[7].toInt(), 255));
+		st.note = note;
+		steps.append(st);
+	}
+	return !steps.isEmpty();
+}
+
+void StreamSession::PsWrapAutopilotTick()
+{
+	if (++pswrap_auto_ticks % 30 == 0) {
+		const QDateTime m = QFileInfo(pswrap_auto_path).lastModified();
+		if (m != pswrap_auto_mtime) {
+			pswrap_auto_mtime = m;
+			pswrapAutoLoad(pswrap_auto_path, pswrap_auto_steps, pswrap_auto_loop_ms);
+			pswrap_auto_start_ms = nowMs();
+			pswrap_auto_cur = -1;
+			qCInfo(chiakiGui) << "[autopilot] reloaded" << pswrap_auto_steps.size() << "steps, loop" << pswrap_auto_loop_ms;
+		}
+	}
+	if (pswrap_auto_steps.isEmpty()) {
+		chiaki_controller_state_set_idle(&autopilot_state);
+		return;
+	}
+	qint64 t = nowMs() - pswrap_auto_start_ms;
+	const qint64 end = pswrap_auto_steps.last().t_ms;
+	if (t > end + 1000 && pswrap_auto_loop_ms >= 0 && pswrap_auto_loop_ms < end) {
+		pswrap_auto_start_ms = nowMs() - pswrap_auto_loop_ms;   // restart at the loop point
+		t = pswrap_auto_loop_ms;
+		pswrap_auto_cur = -1;
+	}
+	int idx = -1;
+	for (int i = 0; i < pswrap_auto_steps.size() && pswrap_auto_steps[i].t_ms <= t; i++)
+		idx = i;
+	if (idx < 0)
+		return;
+	if (idx == pswrap_auto_steps.size() - 1 && t > end + 1000 && pswrap_auto_loop_ms < 0) {
+		if (pswrap_auto_cur != -2) {
+			chiaki_controller_state_set_idle(&autopilot_state);   // script finished (keep watching the file)
+			SendFeedbackState();
+			qCInfo(chiakiGui) << "[autopilot] done";
+			pswrap_auto_cur = -2;
+		}
+		return;
+	}
+	if (idx != pswrap_auto_cur) {
+		const PsWrapAutoStep &s = pswrap_auto_steps[idx];
+		pswrap_auto_cur = idx;
+		autopilot_state.buttons = s.buttons;
+		autopilot_state.left_x = s.lx;
+		autopilot_state.left_y = s.ly;
+		autopilot_state.right_x = s.rx;
+		autopilot_state.right_y = s.ry;
+		autopilot_state.l2_state = s.l2;
+		autopilot_state.r2_state = s.r2;
+		qCInfo(chiakiGui).nospace() << "[autopilot] t=" << t << " step " << idx << " buttons=0x" << Qt::hex << s.buttons << Qt::dec
+			<< " L=(" << s.lx << "," << s.ly << ") R=(" << s.rx << "," << s.ry << ") L2=" << s.l2 << " R2=" << s.r2 << " " << s.note;
+	}
+	SendFeedbackState();   // keep sending (the console expects a steady input stream)
 }

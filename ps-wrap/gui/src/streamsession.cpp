@@ -25,6 +25,28 @@
 
 #include <cstring>
 
+#ifdef __APPLE__
+#include <IOKit/pwr_mgt/IOPMLib.h>
+#endif
+// PS-WRAP-FG: sans entrée manette (AFK), macOS mettait l'écran en veille → le stream se figeait.
+static void pswrapHoldDisplayAwake(bool on)
+{
+#ifdef __APPLE__
+	static IOPMAssertionID id = 0;
+	static int refs = 0;
+	if(on) {
+		if(refs++ == 0)
+			IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionLevelOn,
+				CFSTR("PS-WRAP-FG streaming"), &id);
+	} else if(refs > 0 && --refs == 0 && id) {
+		IOPMAssertionRelease(id);
+		id = 0;
+	}
+#else
+	(void)on;
+#endif
+}
+
 #define SETSU_UPDATE_INTERVAL_MS 4
 #define STEAMDECK_UPDATE_INTERVAL_MS 4
 #define STEAMDECK_HAPTIC_INTERVAL_MS 10 // check every interval
@@ -399,6 +421,7 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	rumble_haptics_connected(false),
 	rumble_haptics_on(false)
 {
+	pswrapHoldDisplayAwake(true);   // PS-WRAP-FG: écran allumé pendant tout le stream (AFK = plus de freeze)
 	mic_buf.buf = nullptr;
 	connected = false;
 	muted = true;
@@ -521,6 +544,7 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	chiaki_controller_state_set_idle(&touch_state);
 	chiaki_controller_state_set_idle(&link_state); // PS-WRAP Link
 	PsWrapStayAwakeInit(connect_info.settings); // PS-WRAP: Stay Awake
+	PsWrapAutopilotInit(); // PS-WRAP-MAC-FG: env PSWRAP_AUTOPILOT only
 	touch_tracker=QMap<int, uint8_t>();
 	mouse_touch_id=-1;
 	dpad_touch_id =-1;
@@ -705,6 +729,7 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 
 StreamSession::~StreamSession()
 {
+	pswrapHoldDisplayAwake(false);
 	mic_active.storeRelaxed(false);
 	StopAudioOutDrainThread();
 	if(audio_out)
@@ -810,6 +835,21 @@ void StreamSession::Start()
 		throw ChiakiException("Chiaki Session Start failed");
 	}
 	session_started = true;
+	// PS-WRAP-MAC-FG: video watchdog — once video has flowed, a silence > 3 s while the session is up (seen once after
+	// the Mac display slept and the screen locked) asks the console for a new IDR every 3 s until frames come back
+	pswrap_last_video_ms.storeRelaxed(0);
+	auto *wd = new QTimer(this);
+	wd->setInterval(1000);
+	connect(wd, &QTimer::timeout, this, [this]() {
+		const qint64 last = pswrap_last_video_ms.loadRelaxed();
+		const qint64 now = qint64(chiaki_time_now_monotonic_ms());
+		if (last <= 0 || now - last < 3000 || now - pswrap_last_idr_req_ms < 3000)
+			return;
+		pswrap_last_idr_req_ms = now;
+		CHIAKI_LOGW(log.GetChiakiLog(), "PSWRAP video watchdog: no video for %lld ms — requesting IDR", (long long)(now - last));
+		chiaki_session_request_idr(&session);
+	});
+	wd->start();
 }
 
 void StreamSession::Stop()
@@ -1276,6 +1316,7 @@ void StreamSession::DpadSendFeedbackState()
 	PsWrapApplyLinkMotion(&state); // PS-WRAP Link: เพื่อนเอียงมือถือ = ไจโรของเพื่อน
 	PsWrapNoteInput(state); // PS-WRAP: Stay Awake — นับเฉพาะ input จริง (ก่อนรวม awake_state)
 	chiaki_controller_state_or(&state, &state, &awake_state);
+	chiaki_controller_state_or(&state, &state, &autopilot_state); // PS-WRAP-MAC-FG: test autopilot (idle unless enabled)
 
 	ApplyInputBlock(&state);
 	if((dpad_touch_shortcut1 || dpad_touch_shortcut2 || dpad_touch_shortcut3 || dpad_touch_shortcut4) && (!dpad_touch_shortcut1 || (state.buttons & dpad_touch_shortcut1)) && (!dpad_touch_shortcut2 || (state.buttons & dpad_touch_shortcut2)) && (!dpad_touch_shortcut3 || (state.buttons & dpad_touch_shortcut3)) && (!dpad_touch_shortcut4 || (state.buttons & dpad_touch_shortcut4)))
@@ -1326,6 +1367,7 @@ void StreamSession::SendFeedbackState()
 	PsWrapApplyLinkMotion(&state); // PS-WRAP Link: เพื่อนเอียงมือถือ = ไจโรของเพื่อน
 	PsWrapNoteInput(state); // PS-WRAP: Stay Awake — นับเฉพาะ input จริง (ก่อนรวม awake_state)
 	chiaki_controller_state_or(&state, &state, &awake_state);
+	chiaki_controller_state_or(&state, &state, &autopilot_state); // PS-WRAP-MAC-FG: test autopilot (idle unless enabled)
 
 	ApplyInputBlock(&state);
 	if((dpad_touch_shortcut1 || dpad_touch_shortcut2 || dpad_touch_shortcut3 || dpad_touch_shortcut4) && (!dpad_touch_shortcut1 || (state.buttons & dpad_touch_shortcut1)) && (!dpad_touch_shortcut2 || (state.buttons & dpad_touch_shortcut2)) && (!dpad_touch_shortcut3 || (state.buttons & dpad_touch_shortcut3)) && (!dpad_touch_shortcut4 || (state.buttons & dpad_touch_shortcut4)))
@@ -1388,11 +1430,14 @@ void StreamSession::OpenAudioOut(unsigned int channels, unsigned int rate)
 	spec.samples = audio_buffer_size / audio_out_sample_size;
 
 	SDL_AudioSpec obtained;
-	audio_out = SDL_OpenAudioDevice(audio_out_device_name.isEmpty() ? nullptr : qUtf8Printable(audio_out_device_name), false, &spec, &obtained, false);
+	// PS-WRAP-FG: "Auto" = périphérique par défaut (sinon la réouverture après un blocage échoue avec "No such device")
+	const bool pswrap_auto_dev = audio_out_device_name.isEmpty() || audio_out_device_name == QLatin1String("Auto");
+	const QByteArray pswrap_dev_name = audio_out_device_name.toUtf8();
+	audio_out = SDL_OpenAudioDevice(pswrap_auto_dev ? nullptr : pswrap_dev_name.constData(), false, &spec, &obtained, false);
 	if(!audio_out)
 	{
 		CHIAKI_LOGE(log.GetChiakiLog(), "Failed to open Audio Output Device '%s': %s", qPrintable(audio_out_device_name), SDL_GetError());
-		if(audio_out_device_name.isEmpty() || audio_out_device_name == QLatin1String("Auto"))
+		if(pswrap_auto_dev)
 			return;
 		audio_out_device_name.clear();
 		audio_out = SDL_OpenAudioDevice(nullptr, false, &spec, &obtained, false);
@@ -2972,5 +3017,6 @@ static void SessionSDeckCb(SDeckEvent *event, void *user)
 static void FfmpegFrameCb(ChiakiFfmpegDecoder *decoder, void *user)
 {
 	auto session = reinterpret_cast<StreamSession *>(user);
+	session->pswrap_last_video_ms.storeRelaxed(qint64(chiaki_time_now_monotonic_ms()));   // PS-WRAP-MAC-FG: video watchdog
 	StreamSessionPrivate::TriggerFfmpegFrameAvailable(session);
 }

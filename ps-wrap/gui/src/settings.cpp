@@ -687,7 +687,11 @@ static const QMap<PlaceboPreset, QString> placebo_preset_values = {
 	{ PlaceboPreset::Custom, "custom" }
 };
 
+#ifdef PSWRAP_FG_BUILD
+static const PlaceboPreset placebo_preset_default = PlaceboPreset::HighQualitySpatial;   // FG: upscaling FSRCNNX
+#else
 static const PlaceboPreset placebo_preset_default = PlaceboPreset::HighQuality;
+#endif
 
 PlaceboPreset Settings::GetPlaceboPreset() const
 {

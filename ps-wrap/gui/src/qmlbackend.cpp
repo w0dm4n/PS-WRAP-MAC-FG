@@ -13,6 +13,7 @@
 #include "chiaki/remote/holepunch.h"
 #ifdef Q_OS_MACOS
 #include "macWakeSleep.h"
+#include "pswrapvtframegen.h"
 #elif defined(Q_OS_WINDOWS)
 #include "windowsWakeSleep.h"
 #endif
@@ -40,6 +41,7 @@
 extern "C" {
 #include <chiaki/time.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/dict.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/pixfmt.h>
 }
@@ -492,6 +494,37 @@ bool QmlBackend::prepareFrameForPresentation(ChiakiFfmpegFrame &frame, bool use_
     return frame_has_planes(frame.frame);
 }
 
+// PS-WRAP: hand one decoded frame to the renderer — split in two so the Apple VT frame gen can prepare on the
+// frame thread and present later from its pacer thread
+bool QmlBackend::pswrapPrepareFrame(ChiakiFfmpegFrame &frame, bool use_opengl_renderer)
+{
+    const qint64 prepare_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
+    if (!prepareFrameForPresentation(frame, use_opengl_renderer))
+    {
+        av_frame_free(&frame.frame);
+        return false;
+    }
+    const qint64 prepare_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
+    if (prepare_end_us >= prepare_begin_us && prepare_end_us - prepare_begin_us >= 5000) {
+        CHIAKI_NOISY_DEBUG().nospace()
+            << "[decode] prepare_frame_us=" << (prepare_end_us - prepare_begin_us)
+            << " pts=" << frame.pts;
+    }
+    if (pending_recovered_frame.fetchAndStoreRelaxed(0) != 0)
+        frame.recovered = true;
+    return true;
+}
+
+void QmlBackend::pswrapPresentFrame(ChiakiFfmpegFrame frame)
+{
+    const int32_t frames_lost = pswrap_frames_lost.fetchAndStoreRelaxed(0);
+    const qint64 delivery_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
+    QmlMainWindow *target_window = window;
+    QMetaObject::invokeMethod(target_window, [target_window, frame, frames_lost, delivery_us]() mutable {
+        target_window->presentFrame(frame, frames_lost, delivery_us);
+    });
+}
+
 QmlBackend::~QmlBackend()
 {
     if(session)
@@ -508,6 +541,10 @@ QmlBackend::~QmlBackend()
 #endif
     frame_thread->quit();
     frame_thread->wait();
+#ifdef Q_OS_MACOS
+    delete pswrap_vt_fg;   // frame thread stopped → safe
+    pswrap_vt_fg = nullptr;
+#endif
     frame_thread->parent()->deleteLater();
     psn_connection_thread.quit();
     psn_connection_thread.wait();
@@ -1140,32 +1177,35 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
         if (!frame.frame)
             return;
         logDecoderDeliveryStats(static_cast<qint64>(chiaki_time_now_monotonic_us()), frames_lost, frame.recovered);
+        // PS-WRAP-MAC-FG: arrival time on the frame thread (present-timing log, PSWRAP_PRESENT_LOG)
+        av_dict_set_int(&frame.frame->metadata, "pswrap_arrival_us", static_cast<int64_t>(chiaki_time_now_monotonic_us()), 0);
         logDecoderFramePtsStats(static_cast<qint64>(chiaki_time_now_monotonic_us()), frame.pts, frame.duration);
         if (frame.recovered)
             pending_recovered_frame.storeRelaxed(1);
 
-        const qint64 prepare_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-        if (!prepareFrameForPresentation(frame, use_opengl_renderer))
-        {
-            av_frame_free(&frame.frame);
-            return;
+        // PS-WRAP: everything below = hand one frame to the renderer (the Apple VT frame gen may call it twice / later)
+        if (frames_lost > 0)
+            pswrap_frames_lost.fetchAndAddRelaxed(frames_lost);
+#ifdef Q_OS_MACOS
+        // PS-WRAP-MAC: Frame Gen with Apple's VideoToolbox interpolation on the decoded CVPixelBuffer (before hw→sw transfer)
+        if (window && window->pswrapVtFrameGenWanted()) {
+            if (!pswrap_vt_fg)
+                pswrap_vt_fg = new PsWrapVtFrameGen(
+                    [this, use_opengl_renderer](ChiakiFfmpegFrame &f) { return pswrapPrepareFrame(f, use_opengl_renderer); },
+                    [this](ChiakiFfmpegFrame f) { pswrapPresentFrame(f); });
+            pswrap_vt_fg->setEngine(window->pswrapVtEngineMode());
+            const bool taken = pswrap_vt_fg->handle(frame);
+            window->pswrapSetVtFrameGenActive(pswrap_vt_fg->active());
+            if (taken)
+                return;
+        } else if (pswrap_vt_fg) {
+            pswrap_vt_fg->flush();
+            if (window)
+                window->pswrapSetVtFrameGenActive(false);
         }
-        const qint64 prepare_end_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-        if (prepare_end_us >= prepare_begin_us && prepare_end_us - prepare_begin_us >= 5000) {
-            CHIAKI_NOISY_DEBUG().nospace()
-                << "[decode] prepare_frame_us=" << (prepare_end_us - prepare_begin_us)
-                << " pts=" << frame.pts;
-        }
-
-        if (pending_recovered_frame.fetchAndStoreRelaxed(0) != 0) {
-            frame.recovered = true;
-        }
-
-        const qint64 delivery_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
-        QmlMainWindow *target_window = window;
-        QMetaObject::invokeMethod(target_window, [target_window, frame, frames_lost, delivery_us]() mutable {
-            target_window->presentFrame(frame, frames_lost, delivery_us);
-        });
+#endif
+        if (pswrapPrepareFrame(frame, use_opengl_renderer))
+            pswrapPresentFrame(frame);
     });
 
     StreamSession *session_for_connections = session;
@@ -1184,6 +1224,14 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
         chiaki_log_ctx = nullptr;
         chiaki_log_mutex.unlock();
         pending_recovered_frame.storeRelaxed(0);
+#ifdef Q_OS_MACOS
+        QMetaObject::invokeMethod(frame_thread->parent(), [this]() {
+            if (pswrap_vt_fg)
+                pswrap_vt_fg->reset();
+        });
+        if (window)
+            window->pswrapSetVtFrameGenActive(false);
+#endif
         {
             QMutexLocker locker(&hw_transfer_state_mutex);
             logged_hw_transfer_formats.clear();

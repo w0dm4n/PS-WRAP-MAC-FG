@@ -75,3 +75,42 @@ void pswrapMetalLayerSync(void *nsview)
 	if (CAMetalLayer *metal = findMetalLayer(view))
 		applyGeometry(view, metal);
 }
+
+// ---------------------------------------------------------------- PS-WRAP-MAC-FG refresh-rate hint
+@interface PsWrapRefreshPin : NSObject
+- (void)tick:(id)link;
+@end
+@implementation PsWrapRefreshPin
+- (void)tick:(id)link { (void)link; }
+@end
+
+void pswrapSetHighRefreshHint(void *nsview, bool on)
+{
+	static CADisplayLink *link API_AVAILABLE(macos(14.0)) = nil;
+	static PsWrapRefreshPin *target = nil;
+	static NSView *linked_view = nil;
+	static const bool disabled = getenv("PSWRAP_NO_REFRESH_HINT") != nullptr;   // test switch
+	if (disabled)
+		return;
+	if (@available(macOS 14.0, *)) {
+		NSView *view = (__bridge NSView *)nsview;
+		if (on && view && (!link || linked_view != view)) {
+			if (link) {
+				[link invalidate];
+				link = nil;
+			}
+			if (!target)
+				target = [[PsWrapRefreshPin alloc] init];
+			link = [view displayLinkWithTarget:target selector:@selector(tick:)];
+			link.preferredFrameRateRange = CAFrameRateRangeMake(60, 120, 120);
+			[link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+			linked_view = view;
+			qCInfo(pswrapMetal) << "refresh hint on (CADisplayLink 60-120, preferred 120)";
+		} else if (!on && link) {
+			[link invalidate];
+			link = nil;
+			linked_view = nil;
+			qCInfo(pswrapMetal) << "refresh hint off";
+		}
+	}
+}

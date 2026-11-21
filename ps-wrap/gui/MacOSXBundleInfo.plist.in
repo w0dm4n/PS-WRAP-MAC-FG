@@ -32,6 +32,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>PS-WRAP-MAC needs the microphone for voice chat and mic streaming.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PS-WRAP-MAC finds and connects to your PlayStation on the local network for Remote Play.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>NSCameraUsageDescription</key>
