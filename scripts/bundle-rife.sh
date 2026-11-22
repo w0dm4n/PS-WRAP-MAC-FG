@@ -14,7 +14,9 @@ B="$ROOT/ps-wrap/third-party/pswraprife/.build/release"
 mkdir -p "$APP/Contents/Frameworks" "$APP/Contents/Resources/rife"
 cp -f "$B/libPsWrapRife.dylib" "$APP/Contents/Frameworks/"
 cp -f "$RM/Sources/RifeMetal/Resources/rife-v4.25.rmw" "$APP/Contents/Resources/rife/"
-cp -f "$B/RifeMetal_RifeMetalCore.bundle/default.metallib" "$APP/Contents/Resources/rife/"
+ML="$B/RifeMetal_RifeMetalCore.bundle/default.metallib"
+[ -f "$ML" ] || ML="$B/RifeMetal_RifeMetalCore.bundle/Contents/Resources/default.metallib"   # newer SwiftPM (Xcode 27) emits macOS-style bundles
+cp -f "$ML" "$APP/Contents/Resources/rife/"
 cp -f "$RM/LICENSE" "$APP/Contents/Resources/rife/rife-metal-LICENSE-Apache-2.0.txt"
 cp -f "$RM/THIRD-PARTY.md" "$APP/Contents/Resources/rife/rife-metal-THIRD-PARTY.md"
 cat > "$APP/Contents/Resources/rife/NOTICE.txt" <<NOTE
