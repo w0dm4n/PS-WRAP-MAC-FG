@@ -54,6 +54,7 @@ FocusScope {
     signal closeRequested()
     signal displaySettingsRequested()
     signal placeboSettingsRequested()
+    signal kbmMappingRequested()       // PS-WRAP-MAC-FG: Keyboard & mouse dialog
     signal mainViewRequested()
     signal overlayToggled()
     signal overlayEditRequested()
@@ -517,6 +518,13 @@ FocusScope {
                     iconSource: "qrc:/icons/menu/display.svg"
                     text: qsTr("Display")
                     onClicked: content.displaySettingsRequested()
+                }
+                // PS-WRAP-MAC-FG: keyboard + mouse bindings
+                Tile {
+                    glyph: "⌨"
+                    text: qsTr("Keys")
+                    on: !!Chiaki.window && Chiaki.window.kbmEnabled
+                    onClicked: content.kbmMappingRequested()
                 }
                 Tile {
                     iconSource: "qrc:/icons/menu/renderer.svg"

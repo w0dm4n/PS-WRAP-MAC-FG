@@ -64,6 +64,12 @@ class QmlMainWindow : public QWindow
 {
     Q_OBJECT
     Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY hasVideoChanged)
+    // PS-WRAP-MAC-FG: keyboard + mouse mode (qmlmainwindow_pswrapcontrol.cpp, dialog KbmMappingDialog.qml)
+    Q_PROPERTY(bool kbmEnabled READ kbmEnabled WRITE setKbmEnabled NOTIFY kbmChanged)       // wanted (Cmd+K)
+    Q_PROPERTY(bool kbmActive READ pswrapKbmOn NOTIFY kbmChanged)                           // actually driving the game now
+    Q_PROPERTY(double kbmSensitivity READ kbmSensitivity WRITE setKbmSensitivity NOTIFY kbmChanged)
+    Q_PROPERTY(bool kbmInvertY READ kbmInvertY WRITE setKbmInvertY NOTIFY kbmChanged)
+    Q_PROPERTY(QVariantList kbmRows READ kbmRows NOTIFY kbmChanged)
     Q_PROPERTY(int droppedFrames READ droppedFrames NOTIFY droppedFramesChanged)
     Q_PROPERTY(int streamFps READ streamFps NOTIFY fpsChanged)     // PS-WRAP: เฟรมที่ถอดรหัสได้ต่อวินาที
     Q_PROPERTY(int displayFps READ displayFps NOTIFY fpsChanged)   // PS-WRAP: ภาพใหม่ที่ขึ้นจอต่อวินาที (รวมเฟรมกลางของ Frame Gen)
@@ -304,6 +310,21 @@ public:
     Q_INVOKABLE void addMarker();       // → recorder.markerAdded(seconds) / recorder.failed(msg)
     // PS-WRAP: ภาพหน้าจอ 1 ปุ่ม (qmlmainwindow_pswrapshot.cpp) → screenshotSaved / screenshotFailed
     Q_INVOKABLE void takeScreenshot();
+    // PS-WRAP-MAC-FG: keyboard + mouse bindings — input ids are key names ("W", "Shift") or "mouse:left"
+    bool kbmEnabled() const { return pswrap_kbm_want; }
+    void setKbmEnabled(bool on) { pswrapKbmSet(on); }
+    double kbmSensitivity() const;
+    void setKbmSensitivity(double v);
+    bool kbmInvertY() const;
+    void setKbmInvertY(bool on);
+    QVariantList kbmRows() const;                       // [{action, group, pad, use, inputs:[{id, label}]}]
+    Q_INVOKABLE QString kbmInputForKey(int key) const;  // "" = this key can't be bound
+    Q_INVOKABLE QString kbmInputForMouse(int button) const;
+    Q_INVOKABLE QString kbmInputLabel(const QString &input) const;
+    Q_INVOKABLE QString kbmActionOf(const QString &input) const;   // "" = free
+    Q_INVOKABLE void kbmBind(const QString &action, const QString &input);
+    Q_INVOKABLE void kbmUnbind(const QString &input);
+    Q_INVOKABLE void kbmReset();
     // PS-WRAP: ขนาดพื้นที่ภาพ 16:9 ตาม preset (qmlmainwindow_pswrapsize.cpp) — physical px · width/height -1 = Fullscreen
     Q_INVOKABLE QVariantList playerSizes();   // [{width, height, stream, current}] เฉพาะที่วางบนจอได้ + Fullscreen ท้ายสุด
     Q_INVOKABLE void setPlayerSize(int width, int height);
@@ -390,6 +411,8 @@ signals:
     void replaySecondsChanged();
     void alwaysOnTopChanged();
     void hasVideoChanged();
+    void kbmChanged();                 // PS-WRAP-MAC-FG
+    void kbmDialogRequested();         // PS-WRAP-MAC-FG: Cmd+Shift+K
     void droppedFramesChanged();
     void fpsChanged();                 // PS-WRAP
     void keepVideoChanged();
@@ -588,6 +611,21 @@ private:
     void pswrapDestroyVisual();
     void pswrapInitVisual();                   // GUI thread ตอน init: settings → atomic
     void pswrapInitDiscord();                  // PS-WRAP: Discord Rich Presence
+    // PS-WRAP-MAC-FG: keyboard + mouse mode and local control server (qmlmainwindow_pswrapcontrol.cpp)
+    void pswrapInitControl();
+    void pswrapKbmSet(bool on);                     // user intent (Cmd+K, control server); applied by pswrapKbmApply
+    void pswrapKbmApply();                          // on = wanted && streaming video && window active && no menu
+    bool pswrapKbmOn() const { return pswrap_kbm_on; }
+    bool pswrapKbmMouseEvent(QMouseEvent *event);   // true = consumed by KBM mode
+    void pswrapControlLine(class QLocalSocket *sock, const QByteArray &line);
+    bool pswrap_kbm_on = false;
+    bool pswrap_kbm_want = false;
+    class QTimer *pswrap_kbm_poll = nullptr;          // macOS: cursor polling while captured
+    int pswrap_kbm_diag_ticks = 0, pswrap_kbm_diag_n = 0;
+    double pswrap_kbm_diag_sum = 0;
+    bool pswrap_kbm_capture = false;
+    class QLocalServer *pswrap_control_server = nullptr;
+    class QLocalSocket *pswrap_control_owner = nullptr;   // client whose pad state is live (released on disconnect)
     void pswrapUpdateDiscord();
     class PsWrapDiscord *pswrap_discord = nullptr;
     qint64 pswrap_discord_session_start = 0;   // epoch วินาที ตอนเห็น session ต่อแล้วครั้งแรก

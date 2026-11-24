@@ -71,6 +71,7 @@ set(SOURCE_FILES
 	src/pswrapvoiceproc.cpp
 	src/qmlmainwindow_pswraprec.cpp
 	src/qmlmainwindow_pswrapshot.cpp
+	src/qmlmainwindow_pswrapcontrol.cpp
 	src/qmlmainwindow_pswrapclock.cpp
 	src/qmlmainwindow_pswrapsize.cpp
 	src/qmlmainwindow_pswrapabout.cpp
@@ -108,6 +109,9 @@ set(SOURCE_FILES
 	src/qmlbackend_pswraptools.cpp
 	src/streamsession_pswraplink.cpp
 	src/streamsession_pswrapawake.cpp
+	src/streamsession_pswrapkbm.cpp
+	src/pswrapkbmconfig.cpp
+	include/pswrapkbmconfig.h
 	src/qmlmainwindow_pswraplink.cpp
 	)
 set(RESOURCE_FILES "")
@@ -137,6 +141,8 @@ if(APPLE)
 		src/macWakeSleep.cpp
 		include/macMetalLayer.h
 		src/macMetalLayer.mm
+		include/macMouseCapture.h
+		src/macMouseCapture.mm
 		include/macNetInfo.h
 		src/macNetInfo.mm
 		include/pswrapvtinterp.h

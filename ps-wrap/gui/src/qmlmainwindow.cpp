@@ -2983,6 +2983,7 @@ void QmlMainWindow::grabInput()
 {
     setCursor(Qt::ArrowCursor);
     grab_input++;
+    pswrapKbmApply();   // PS-WRAP-MAC-FG: a menu needs the pointer back
     qCInfo(chiakiGui) << "PSWRAP grabInput count =" << grab_input;
     if (session)
         session->BlockInput(grab_input);
@@ -2998,6 +2999,7 @@ void QmlMainWindow::releaseInput()
         setCursor(Qt::BlankCursor);
     if (session)
         session->BlockInput(grab_input);
+    pswrapKbmApply();   // PS-WRAP-MAC-FG: menu closed → keyboard + mouse mode back if wanted
 }
 
 void QmlMainWindow::requestOverlayUpdate()
@@ -5350,6 +5352,7 @@ renderer_backend_ready:
     pswrapInitRecording();   // PS-WRAP: อัดวิดีโอ + spectrum ไมค์ (qmlmainwindow_pswraprec.cpp)
     pswrapInitVisual();      // PS-WRAP: ambient / frame gen (qmlmainwindow_pswrapvisual.cpp)
     pswrapInitDiscord();     // PS-WRAP: Discord Rich Presence (qmlmainwindow_pswrapdiscord.cpp)
+    pswrapInitControl();     // PS-WRAP-MAC-FG: keyboard + mouse mode, local control server (qmlmainwindow_pswrapcontrol.cpp)
     stats_overlay_widget = new StatsOverlayWidget(this, backend);
     connect(backend, &QmlBackend::sessionChanged, this, [this, exit_app_on_stream_exit](StreamSession *s) {
         const bool preserve_startup_warmup = s && startup_warmup_preserve_next_session_change;
@@ -7912,6 +7915,12 @@ bool QmlMainWindow::handleShortcut(QKeyEvent *event)
     case Qt::Key_O:
         emit menuRequested();
         return true;
+    case Qt::Key_K:   // PS-WRAP-MAC-FG: Cmd+K keyboard + mouse mode on/off, Cmd+Shift+K bindings dialog
+        if (event->modifiers().testFlag(Qt::ShiftModifier))
+            emit kbmDialogRequested();
+        else if (session)
+            pswrapKbmSet(!pswrap_kbm_want);
+        return true;
     case Qt::Key_Q:
 #ifndef Q_OS_MACOS
         close();
@@ -7941,6 +7950,8 @@ bool QmlMainWindow::event(QEvent *event)
         if (static_cast<QMouseEvent*>(event)->source() != Qt::MouseEventNotSynthesized)
             return true;
         if (session && !grab_input) {
+            if (pswrapKbmMouseEvent(static_cast<QMouseEvent*>(event)))   // PS-WRAP-MAC-FG: KBM mode owns the mouse
+                return true;
             // PS-WRAP: เมาส์บน overlay (facecam/จอย/stats) → QML (คลิกเพื่อเข้าโหมดแก้, hover tooltip) ไม่ส่งเข้าเกม
             {
                 const QPointF pos = static_cast<QMouseEvent*>(event)->position();
@@ -8015,6 +8026,8 @@ bool QmlMainWindow::event(QEvent *event)
                 QGuiApplication::sendEvent(quick_window, event);
                 return true;
             }
+            if (session->PsWrapKbmKey(e))   // PS-WRAP-MAC-FG: KBM mode bindings replace the old keymap
+                return true;
             if (e->timestamp())
                 session->HandleKeyboardEvent(e);
             return true;

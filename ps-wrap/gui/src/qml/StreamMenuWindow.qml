@@ -15,6 +15,7 @@ Window {
 
     signal closeRequested()
     signal displaySettingsRequested()
+    signal kbmMappingRequested()
     signal placeboSettingsRequested()
     signal mainViewRequested()
     signal closeAnimationFinished()
@@ -82,6 +83,7 @@ Window {
         overlayEnabled: streamMenuWindow.overlayEnabled
         onCloseRequested: streamMenuWindow.closeRequested()
         onDisplaySettingsRequested: streamMenuWindow.displaySettingsRequested()
+        onKbmMappingRequested: streamMenuWindow.kbmMappingRequested()
         onPlaceboSettingsRequested: streamMenuWindow.placeboSettingsRequested()
         onMainViewRequested: streamMenuWindow.mainViewRequested()
         onOverlayToggled: streamMenuWindow.overlayToggled()

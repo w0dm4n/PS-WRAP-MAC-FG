@@ -545,6 +545,8 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	chiaki_controller_state_set_idle(&link_state); // PS-WRAP Link
 	PsWrapStayAwakeInit(connect_info.settings); // PS-WRAP: Stay Awake
 	PsWrapAutopilotInit(); // PS-WRAP-MAC-FG: env PSWRAP_AUTOPILOT only
+	chiaki_controller_state_set_idle(&kbm_state);
+	chiaki_controller_state_set_idle(&control_state);
 	touch_tracker=QMap<int, uint8_t>();
 	mouse_touch_id=-1;
 	dpad_touch_id =-1;
@@ -1312,6 +1314,8 @@ void StreamSession::DpadSendFeedbackState()
 #endif
 	chiaki_controller_state_or(&state, &state, &keyboard_state);
 	chiaki_controller_state_or(&state, &state, &touch_state);
+	chiaki_controller_state_or(&state, &state, &kbm_state);     // PS-WRAP-MAC-FG: keyboard + mouse mode
+	chiaki_controller_state_or(&state, &state, &control_state); // PS-WRAP-MAC-FG: local control server / MCP
 	chiaki_controller_state_or(&state, &state, &link_state); // PS-WRAP Link
 	PsWrapApplyLinkMotion(&state); // PS-WRAP Link: เพื่อนเอียงมือถือ = ไจโรของเพื่อน
 	PsWrapNoteInput(state); // PS-WRAP: Stay Awake — นับเฉพาะ input จริง (ก่อนรวม awake_state)
@@ -1363,6 +1367,8 @@ void StreamSession::SendFeedbackState()
 #endif
 	chiaki_controller_state_or(&state, &state, &keyboard_state);
 	chiaki_controller_state_or(&state, &state, &touch_state);
+	chiaki_controller_state_or(&state, &state, &kbm_state);     // PS-WRAP-MAC-FG: keyboard + mouse mode
+	chiaki_controller_state_or(&state, &state, &control_state); // PS-WRAP-MAC-FG: local control server / MCP
 	chiaki_controller_state_or(&state, &state, &link_state); // PS-WRAP Link
 	PsWrapApplyLinkMotion(&state); // PS-WRAP Link: เพื่อนเอียงมือถือ = ไจโรของเพื่อน
 	PsWrapNoteInput(state); // PS-WRAP: Stay Awake — นับเฉพาะ input จริง (ก่อนรวม awake_state)

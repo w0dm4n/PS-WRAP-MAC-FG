@@ -499,6 +499,7 @@ Item {
             onCloseRequested: menuController.close()
             onDisplaySettingsRequested: root.openDisplaySettings()
             onPlaceboSettingsRequested: root.openPlaceboSettings()
+            onKbmMappingRequested: { menuController.close(); kbmDialog.open(); }
             onMainViewRequested: root.showMainView()
             onOverlayToggled: Chiaki.window.padOverlay = !Chiaki.window.padOverlay
             onOverlayEditRequested: { menuController.close(); view.startOverlayEdit(); }
@@ -2285,6 +2286,10 @@ Item {
             menuController.close();
             root.openPlaceboSettings();
         }
+        onKbmMappingRequested: {
+            menuController.close();
+            kbmDialog.open();
+        }
         onMainViewRequested: root.showMainView()
         overlayEnabled: Chiaki.window.padOverlay
         onOverlayToggled: Chiaki.window.padOverlay = !Chiaki.window.padOverlay
@@ -2293,6 +2298,22 @@ Item {
                 view.hostWindow.requestActivate();
             menuController.closing = false;
             view.updateOverlayInteractionActive();
+        }
+    }
+
+    // PS-WRAP-MAC-FG: Keyboard & mouse bindings (stream menu › Keys, or Cmd+Shift+K)
+    KbmMappingDialog {
+        id: kbmDialog
+        grabInput: function(item) { view.grabInput(item); view.updateOverlayInteractionActive(); }
+        releaseInput: function() { view.releaseInput(); view.updateOverlayInteractionActive(); }
+    }
+    Connections {
+        target: Chiaki.window
+        function onKbmDialogRequested() {
+            if (kbmDialog.opened)
+                kbmDialog.close();
+            else
+                kbmDialog.open();
         }
     }
 

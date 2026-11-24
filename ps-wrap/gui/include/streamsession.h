@@ -42,6 +42,9 @@
 #include <QMutex>
 #include <QTimer>
 #include <QQueue>
+#include <QHash>
+#include <QMap>
+#include <QKeyEvent>
 #include <QElapsedTimer>
 #include <QThread>
 #include <QWaitCondition>
@@ -263,6 +266,40 @@ class StreamSession : public QObject
 		QDateTime pswrap_auto_mtime;
 		int pswrap_auto_ticks = 0;
 		QTimer *pswrap_auto_timer = nullptr;
+
+		// PS-WRAP-MAC-FG keyboard + mouse mode (streamsession_pswrapkbm.cpp): WASD = left stick, mouse = right stick,
+		// buttons from a binding table (defaults + <AppData>/kbm.json). Toggled by the window (Cmd/Ctrl+K).
+		bool PsWrapKbmActive() const { return kbm_active; }
+		void PsWrapKbmSetActive(bool on);
+		bool PsWrapKbmKey(QKeyEvent *event);                  // true = consumed
+		void PsWrapKbmMouseButton(Qt::MouseButton button, bool pressed);
+		void PsWrapKbmMouseDelta(double dx, double dy);       // raw pointer delta (points)
+		void PsWrapKbmReleaseAll();                           // focus lost etc.
+		void PsWrapKbmReload();                              // re-read PsWrapKbmConfig (kbm.json)
+
+		// PS-WRAP-MAC-FG external control (qmlmainwindow_pswrapcontrol.cpp): full pad state from a local tool, idle = released
+		void PsWrapSetControlState(const ChiakiControllerState &state);
+		ChiakiControllerState PsWrapControlState() const { return control_state; }
+		struct KbmAction { enum Kind { Button, L2, R2, LsUp, LsDown, LsLeft, LsRight, RsUp, RsDown, RsLeft, RsRight, Walk, Drive } kind; uint32_t button; };
+	private:
+		bool kbm_active = false;
+		QHash<int, KbmAction> kbm_keys;                      // Qt::Key -> action
+		QHash<int, KbmAction> kbm_mouse;                     // Qt::MouseButton -> action
+		QMap<int, KbmAction> kbm_down;                       // currently held sources: Qt::Key, or kKbmMouseTag|Qt::MouseButton
+		double kbm_sens = 0.012;                             // stick fraction per point of mouse movement per tick
+		double kbm_deadzone = 0.22;                          // games ignore small stick values: start above it
+		double kbm_curve = 1.0;
+		double kbm_walk = 0.45;                              // left stick magnitude while Walk is held
+		bool kbm_invert_y = false;
+		bool kbm_drive = false;                             // drive mode: LS up/down keys = R2/L2
+		int kbm_keys_rx = 0, kbm_keys_ry = 0;                // camera keys (IJKL)
+		double kbm_acc_dx = 0, kbm_acc_dy = 0, kbm_rx = 0, kbm_ry = 0;
+		QTimer *kbm_timer = nullptr;
+		ChiakiControllerState kbm_state;
+		ChiakiControllerState control_state;
+		QTimer *control_timer = nullptr;
+		void PsWrapKbmRecompute();
+		void PsWrapKbmTick();
 	private:
 		void PsWrapAutopilotInit();
 		void PsWrapAutopilotTick();
